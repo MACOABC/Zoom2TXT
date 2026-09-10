@@ -1,0 +1,36 @@
+ZOOM2TXT 2.6.0 — INSTALACIÓN EN WINDOWS
+========================================
+
+1. Extrae el ZIP completo en una carpeta propia.
+2. Conserva juntos estos tres archivos:
+   - Zoom2TXT.exe
+   - yt-dlp.exe
+   - LEEME.txt
+3. Abre Zoom2TXT.exe.
+4. Completa el asistente con la dirección HTTPS de tu Blackboard, tu propia
+   cuenta institucional y tu credencial OAuth de escritorio de Google.
+
+La aplicación no incluye cuentas, contraseñas, cookies, tokens, clases ni
+transcripciones del autor. La contraseña se guarda en el almacén seguro de
+Windows y la configuración vive en la carpeta de datos del usuario.
+
+REQUISITOS
+----------
+
+- Windows 10 u 11 de 64 bits.
+- Conexión a Internet.
+- Acceso legítimo a Blackboard y a las grabaciones de tus cursos.
+- Un proyecto propio de Google Cloud con YouTube Data API v3 habilitada.
+
+Si Windows SmartScreen advierte que el editor es desconocido, se debe a que
+esta versión de portafolio no está firmada con un certificado comercial.
+Descarga el paquete únicamente desde la sección Releases del repositorio
+oficial: https://github.com/MACOABC/Zoom2TXT/releases
+
+MODO DEMO PARA DESARROLLADORES
+-----------------------------
+
+Desde el código fuente ejecuta: python main.py --demo
+El demo es local, usa datos ficticios y no se conecta a servicios externos.
+
+Más documentación: https://github.com/MACOABC/Zoom2TXT

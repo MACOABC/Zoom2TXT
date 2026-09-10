@@ -1,0 +1,32 @@
+name: Reporte de error
+description: Informa un fallo reproducible sin compartir datos privados.
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: No incluyas tokens, cookies, URLs reales de grabaciones, cursos ni transcripciones.
+  - type: input
+    id: version
+    attributes:
+      label: Versión
+      placeholder: 2.6.0
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Qué ocurrió
+      description: Usa nombres e identificadores ficticios.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Pasos para reproducir
+    validations:
+      required: true
+  - type: textarea
+    id: checks
+    attributes:
+      label: Verificaciones realizadas
