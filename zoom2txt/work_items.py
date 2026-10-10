@@ -51,12 +51,16 @@ def local_continuations(settings, ranges=()):
 
 
 def job_status(job):
+    if job.get("cleanup_pending"):
+        return "Eliminación pendiente"
+    if job.get("status") == "waiting_captions":
+        return "Texto en proceso"
     if job.get("status") in ("done", "transcribed"):
         return "TXT disponible"
     if job.get("status") == "sync_pending":
         return "Copia pendiente"
     if job.get("video_id"):
-        return "Revisar YouTube"
+        return "Continuar transcripción"
     if job.get("status") in ("uploading", "upload_unknown"):
         return "Recuperar subida"
     if job.get("video"):

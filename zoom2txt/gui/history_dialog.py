@@ -37,6 +37,7 @@ LABELS = {
     "pending": "Pendiente",
     "duplicate": "Alternativa descartada",
     "transcribed": "TXT validado",
+    "cleanup_pending": "TXT guardado · eliminación remota pendiente",
 }
 
 

@@ -38,7 +38,7 @@ from zoom2txt.gui import style
 from zoom2txt.gui.settings_dialog import SettingsDialog
 from zoom2txt.gui.setup_wizard import SetupWizard
 from zoom2txt.gui.workers import (
-    DeleteVideoWorker,
+    CleanupWorker,
     MaterialDownloadWorker,
     MaterialScanWorker,
     PipelineWorker,
@@ -106,6 +106,7 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(880, 560)
         self.resize(1180, 780)
         self.recovery_worker = None
+        self.cleanup_worker = None
         self._closing = False
         from zoom2txt.gui.icon import make_app_icon
 
@@ -119,6 +120,43 @@ class MainWindow(QMainWindow):
         self._backlog_timer.start()
         QTimer.singleShot(0, self._refresh_backlog_notice)
         QTimer.singleShot(0, self._load_saved_work)
+        self._cleanup_timer = QTimer(self)
+        self._cleanup_timer.setInterval(120_000)
+        self._cleanup_timer.timeout.connect(self._retry_cleanup)
+        self._cleanup_timer.start()
+        QTimer.singleShot(3000, self._retry_cleanup)
+
+    def _retry_cleanup(self):
+        if self._closing or self._busy():
+            return
+        from zoom2txt.storage import StateStore
+
+        if not any(
+            row.get("cleanup_pending") and not row.get("youtube_deleted")
+            for row in StateStore(self.settings).list("job")
+        ):
+            return
+        self.cleanup_worker = CleanupWorker(self.settings, self)
+        self.cleanup_worker.log.connect(self._log)
+        self.cleanup_worker.finished.connect(self._cleanup_finished)
+        self.cleanup_worker.start()
+
+    def _cleanup_finished(self):
+        self._refresh_backlog_notice()
+        from zoom2txt.blackboard.registry import recording_key
+        from zoom2txt.storage import StateStore
+
+        state = StateStore(self.settings)
+        for row, item in enumerate(self._scan_items):
+            if row >= self.table.rowCount():
+                break
+            key = item.get("job_key") or recording_key(item["course_id"], item["meeting_id"])
+            job = state.get("job", key)
+            if job.get("youtube_deleted") and job.get("status") in ("done", "sync_pending"):
+                self._set_class_status(
+                    row, "TXT verificado", "Texto disponible; eliminación remota confirmada."
+                )
+                self.table.item(row, 0).setCheckState(Qt.CheckState.Unchecked)
 
     def _setup_tray(self) -> None:
         """Bandeja del sistema: permite avisar cuando una transcripción
@@ -421,7 +459,11 @@ class MainWindow(QMainWindow):
 
         bottom = QHBoxLayout()
         self.delete_chk = QCheckBox("Eliminar cada video de YouTube al obtener su texto")
-        self.delete_chk.setChecked(self.settings.auto_delete_youtube)
+        self.delete_chk.setChecked(True)
+        self.delete_chk.setEnabled(False)
+        self.delete_chk.setToolTip(
+            "Obligatorio: después de verificar el TXT, se elimina la copia remota. Los fallos se reintentan automáticamente."
+        )
         self.skip_all_btn = QPushButton("Omitir todo lo pendiente")
         self.skip_all_btn.setToolTip(
             "Marca TODAS las grabaciones pendientes como ya procesadas sin "
@@ -528,6 +570,9 @@ class MainWindow(QMainWindow):
         lbl_name.setObjectName("h2")
         self.name_edit = QLineEdit()
         self.name_edit.setPlaceholderText("Ej: Matematica_Clase01")
+        self.recording_pass_edit = QLineEdit()
+        self.recording_pass_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self.recording_pass_edit.setPlaceholderText("Opcional · clave de ESTA grabación de Zoom")
         lbl_url.setBuddy(self.url_edit)
         lbl_name.setBuddy(self.name_edit)
 
@@ -551,6 +596,8 @@ class MainWindow(QMainWindow):
         lay.addSpacing(16)
         lay.addWidget(lbl_name)
         lay.addWidget(self.name_edit)
+        lay.addWidget(QLabel("Contraseña de la grabación · diferente del acceso a Blackboard"))
+        lay.addWidget(self.recording_pass_edit)
         lay.addSpacing(16)
         lay.addLayout(actions)
         lay.addStretch()
@@ -845,7 +892,7 @@ class MainWindow(QMainWindow):
             wizard = SetupWizard(self.settings, self)
             if wizard.exec() != wizard.DialogCode.Accepted:
                 return None
-        return get_zoom_password(self.settings.zoom_user)
+        return get_zoom_password(self.settings.zoom_user) or ""
 
     def _ensure_pipeline_health(self) -> bool:
         """Detiene fallos locales previsibles antes de bajar un video grande."""
@@ -877,6 +924,7 @@ class MainWindow(QMainWindow):
             self.mat_scan_worker,
             self.mat_dl_worker,
             self.recovery_worker,
+            self.cleanup_worker,
         ):
             if w and w.isRunning():
                 return True
@@ -904,7 +952,9 @@ class MainWindow(QMainWindow):
         from zoom2txt.blackboard.client import BlackboardClient
         from zoom2txt.gui.login_webview import BlackboardLoginDialog
 
-        dialog = BlackboardLoginDialog(self.settings.blackboard_url, self)
+        dialog = BlackboardLoginDialog(
+            self.settings.blackboard_url, self, user=self.settings.zoom_user
+        )
         if dialog.exec() == dialog.DialogCode.Accepted:
             BlackboardClient(self.settings.blackboard_url, self._log).store_cookies(dialog.cookies)
             self._log("[+] Sesión de Blackboard guardada.")
@@ -1043,11 +1093,15 @@ class MainWindow(QMainWindow):
 
     def _on_needs_login(self) -> None:
         self.scan_btn.setEnabled(True)
-        self.scan_status.setText("Inicia sesión para continuar.")
+        self.scan_status.setText(
+            "Reconectando Blackboard; la sesión anterior caducó o aún no se ha configurado."
+        )
         from zoom2txt.blackboard.client import BlackboardClient
         from zoom2txt.gui.login_webview import BlackboardLoginDialog
 
-        dialog = BlackboardLoginDialog(self.settings.blackboard_url, self)
+        dialog = BlackboardLoginDialog(
+            self.settings.blackboard_url, self, user=self.settings.zoom_user
+        )
         if dialog.exec() == dialog.DialogCode.Accepted:
             BlackboardClient(self.settings.blackboard_url, self._log).store_cookies(dialog.cookies)
             self._log("[+] Sesión de Blackboard guardada.")
@@ -1179,6 +1233,15 @@ class MainWindow(QMainWindow):
             None,
         )
 
+    def _on_queue_waiting(self, index):
+        row = self._queue_table_row(index)
+        if row is not None:
+            self._set_class_status(
+                row,
+                "Texto en proceso",
+                "La clase ya está preparada. Las demás avanzan mientras se genera su transcripción.",
+            )
+
     def _on_queue_item_finished(self, index, txt):
         from zoom2txt.blackboard.registry import recording_key
         from zoom2txt.storage import StateStore
@@ -1190,7 +1253,15 @@ class MainWindow(QMainWindow):
         job = StateStore(self.settings).get(
             "job", item.get("job_key") or recording_key(item["course_id"], item["meeting_id"])
         )
-        if txt:
+        if job.get("cleanup_pending"):
+            self._set_class_status(
+                row,
+                "Eliminación pendiente",
+                "TXT guardado. El borrado remoto se reintentará automáticamente; consulta Historial.",
+            )
+        elif job.get("status") == "waiting_captions" and not job.get("error"):
+            self._on_queue_waiting(index)
+        elif txt:
             self._set_class_status(row, "TXT verificado", "Texto disponible en tu biblioteca.")
             self.table.item(row, 0).setCheckState(Qt.CheckState.Unchecked)
         else:
@@ -1284,7 +1355,7 @@ class MainWindow(QMainWindow):
             return
         if not self._ensure_pipeline_health():
             return
-        self.settings.auto_delete_youtube = self.delete_chk.isChecked()
+        self.settings.auto_delete_youtube = True
         self.settings.save()
         self._launch_queue(selected, password or "")
 
@@ -1309,6 +1380,7 @@ class MainWindow(QMainWindow):
         self.queue_worker.stage.connect(self._on_stage)
         self.queue_worker.item_started.connect(self._on_queue_item)
         self.queue_worker.item_finished.connect(self._on_queue_item_finished)
+        self.queue_worker.item_waiting.connect(self._on_queue_waiting)
         self.queue_worker.all_done.connect(self._on_queue_done)
         self.queue_worker.start()
 
@@ -1327,7 +1399,10 @@ class MainWindow(QMainWindow):
             self.cancel_queue_btn.setEnabled(False)
 
     def _on_queue_done(self, ok: int, failed: int) -> None:
-        self.queue_label.setText(f"{ok} TXT verificados · {failed} con problemas")
+        pending_count = max(0, self._queue_total - ok - failed)
+        self.queue_label.setText(
+            f"{ok} completadas · {pending_count} pendientes · {failed} con problemas"
+        )
         self._active_queue_index = None
         self.table.setEnabled(True)
         self.cancel_queue_btn.hide()
@@ -1336,10 +1411,12 @@ class MainWindow(QMainWindow):
         self.settings_btn.setEnabled(True)
         self._log("")
         self._log("============================================")
-        self._log(f"Cola terminada: {ok} transcritas, {failed} con problemas.")
+        self._log(
+            f"Tanda revisada: {ok} completadas, {pending_count} pendientes, {failed} con problemas."
+        )
         self._notify(
-            "Cola terminada",
-            f"{ok} clases transcritas" + (f", {failed} con problemas." if failed else "."),
+            "Tanda revisada",
+            f"{ok} completadas · {pending_count} pendientes · {failed} con problemas.",
         )
         self._refresh_backlog_notice()
         self._log("[i] " + self.backlog_notice.text())
@@ -1388,7 +1465,7 @@ class MainWindow(QMainWindow):
             )
             return
         password = self._ensure_credentials()
-        if not password:
+        if password is None:
             return
         if not self._ensure_pipeline_health():
             return
@@ -1398,7 +1475,9 @@ class MainWindow(QMainWindow):
         self._result_path = None
         self._set_running(True)
 
-        self.worker = PipelineWorker(url, password, nombre, self.settings, self)
+        self.worker = PipelineWorker(
+            url, self.recording_pass_edit.text() or password, nombre, self.settings, self
+        )
         self.worker.log.connect(self._log)
         self.worker.stage.connect(self._on_stage)
         self.worker.done.connect(self._on_done)
@@ -1417,6 +1496,7 @@ class MainWindow(QMainWindow):
         self.cancel_btn.setEnabled(True)
         self.url_edit.setEnabled(not running)
         self.name_edit.setEnabled(not running)
+        self.recording_pass_edit.setEnabled(not running)
         self.settings_btn.setEnabled(not running)
         self.scan_btn.setEnabled(not running)
 
@@ -1426,7 +1506,13 @@ class MainWindow(QMainWindow):
             row = self._queue_table_row(active)
             if row is not None:
                 self._set_class_status(
-                    row, ["Preparando video", "Subiendo…", "Subtítulos…", "Verificando TXT"][index]
+                    row,
+                    [
+                        "Preparando video",
+                        "Preparando texto…",
+                        "Texto en proceso…",
+                        "Verificando y limpiando",
+                    ][index],
                 )
         self._current_stage = index
         for i, row in enumerate(self.stage_rows):
@@ -1435,66 +1521,34 @@ class MainWindow(QMainWindow):
     def _on_done(self, txt_path: str, video_id: str) -> None:
         self._refresh_backlog_notice()
         self._set_running(False)
-        if txt_path:
-            for row in self.stage_rows:
-                row.set_state("done")
-            self._result_path = Path(txt_path)
-            self.open_btn.show()
-            self._log("")
-            self._log("============================================")
+        if not txt_path:
             self._log(
-                f"¡Proceso terminado! Ya puedes arrastrar '{self._result_path.name}' a NotebookLM."
+                "[i] Trabajo pendiente. Puedes continuar desde Historial sin repetir los pasos confirmados."
+            )
+            return
+        from zoom2txt.storage import StateStore
+
+        jobs = [j for j in StateStore(self.settings).list("job") if j.get("video_id") == video_id]
+        cleanup_pending = any(job.get("cleanup_pending") for job in jobs)
+        for row in self.stage_rows:
+            row.set_state("done")
+        self._result_path = Path(txt_path)
+        self.open_btn.show()
+        if cleanup_pending:
+            self.stage_rows[-1].set_state("error")
+            self._log(
+                "[!] TXT guardado; eliminación remota pendiente. Se reintentará automáticamente. Consulta Historial."
             )
             self._notify(
-                "Transcripción lista",
-                f"{self._result_path.name} está lista para NotebookLM.",
+                "Texto guardado · limpieza pendiente",
+                "El TXT está disponible. La eliminación remota aún no se ha confirmado.",
             )
-            if video_id:
-                from zoom2txt.storage import StateStore
-
-                jobs = [
-                    j
-                    for j in StateStore(self.settings).list("job")
-                    if j.get("video_id") == video_id
-                ]
-                if jobs and jobs[0].get("status") == "done":
-                    self._ask_delete_video(video_id)
-                else:
-                    self._log(
-                        "[i] Se conserva el video de YouTube mientras la copia solicitada está pendiente."
-                    )
         else:
             self._log(
-                "[!] El proceso terminó sin transcripción (cancelado o "
-                "subtítulos no disponibles todavía)."
+                f"[+] Clase completada. '{self._result_path.name}' está lista para NotebookLM; eliminación remota confirmada."
             )
-            if video_id:
-                self._log(f"    El video sigue en YouTube: https://youtu.be/{video_id}")
-
-    def _ask_delete_video(self, video_id: str) -> None:
-        answer = QMessageBox.question(
-            self,
-            "Transcripción lista",
-            "Ya tienes el texto de la clase.\n\n"
-            "¿Eliminar el video de YouTube? Es irreversible. Puedes conservarlo como respaldo; su privacidad actual no cambiará.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        if answer != QMessageBox.StandardButton.Yes:
-            self._log(f"[i] Video conservado en YouTube: https://youtu.be/{video_id}")
-            return
-        self._delete_worker = DeleteVideoWorker(video_id, self)
-        self._delete_worker.log.connect(self._log)
-        self._delete_worker.finished_ok.connect(self._on_delete_done)
-        self._delete_worker.start()
-
-    def _on_delete_done(self, ok: bool) -> None:
-        if not ok:
-            QMessageBox.warning(
-                self,
-                "No se pudo eliminar",
-                "El video no se pudo eliminar automáticamente. Puedes "
-                "borrarlo a mano en YouTube Studio.",
+            self._notify(
+                "Transcripción lista", f"{self._result_path.name} está lista para NotebookLM."
             )
 
     def _on_failed(self, error: str) -> None:
@@ -1538,6 +1592,7 @@ class MainWindow(QMainWindow):
                     self.mat_scan_worker,
                     self.mat_dl_worker,
                     self.recovery_worker,
+                    self.cleanup_worker,
                     getattr(self.library, "_loader", None),
                     health_worker,
                 ):

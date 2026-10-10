@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from zoom2txt.auth.credentials import set_zoom_password
+from zoom2txt.auth.credentials import set_blackboard_password, set_zoom_password
 from zoom2txt.config import BB_COOKIES_FILE, DATA_DIR
 from zoom2txt.gui.setup_wizard import SetupWizard
 
@@ -127,8 +127,14 @@ class SettingsDialog(QDialog):
         self.del_video_chk = QCheckBox("Eliminar video local tras verificar TXT y copia solicitada")
         self.del_video_chk.setChecked(settings.delete_local_video)
         form.addRow("", self.del_video_chk)
-        self.delete_youtube = QCheckBox("Eliminar de YouTube al completar una tanda correctamente")
-        self.delete_youtube.setChecked(settings.auto_delete_youtube)
+        self.delete_youtube = QCheckBox(
+            "Eliminar automáticamente el video remoto tras verificar su TXT"
+        )
+        self.delete_youtube.setChecked(True)
+        self.delete_youtube.setEnabled(False)
+        self.delete_youtube.setToolTip(
+            "Obligatorio tras guardar y verificar el TXT. Los fallos de conexión quedan pendientes con reintentos."
+        )
         form.addRow("", self.delete_youtube)
         note = QLabel(
             "Máximo de 6 clases nuevas por día en esta app, sumando todas las tandas. Se renueva a las 00:00 de Lima, aunque cierres la app. Reintentar la misma clase ese día no consume otra plaza. Este límite no es la cuota de Google; las consultas de subtítulos privados sí usan cuota API."
@@ -142,12 +148,18 @@ class SettingsDialog(QDialog):
         self.pass_edit.setEchoMode(QLineEdit.EchoMode.Password)
         self.pass_edit.setPlaceholderText("Dejar vacío para conservar")
         self.bb_edit = QLineEdit(settings.blackboard_url)
+        self.bb_pass_edit = QLineEdit()
+        self.bb_pass_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self.bb_pass_edit.setPlaceholderText(
+            "Opcional · guardar para el acceso automático al campus"
+        )
         self.theme_combo = QComboBox()
         self.theme_combo.addItem("Oscuro", "dark")
         self.theme_combo.addItem("Claro", "light")
         self.theme_combo.setCurrentIndex(1 if settings.theme == "light" else 0)
         form.addRow("Usuario institucional", self.user_edit)
-        form.addRow("Contraseña de grabación", self.pass_edit)
+        form.addRow("Contraseña de Zoom · solo modo manual", self.pass_edit)
+        form.addRow("Contraseña de Blackboard", self.bb_pass_edit)
         form.addRow("Blackboard (HTTPS)", self.bb_edit)
         form.addRow("Tema", self.theme_combo)
         for label, callback in (
@@ -226,6 +238,9 @@ class SettingsDialog(QDialog):
         ):
             return
         BB_COOKIES_FILE.unlink(missing_ok=True)
+        from zoom2txt.auth.credentials import delete_blackboard_password
+
+        delete_blackboard_password(self.settings.blackboard_url, self.settings.zoom_user)
         (DATA_DIR / "yt_cookies.txt").unlink(missing_ok=True)
         from zoom2txt.storage import StateStore
 
@@ -361,11 +376,13 @@ class SettingsDialog(QDialog):
                 batch_size=self.batch.value(),
                 longest_per_day=self.longest.isChecked(),
                 youtube_private=self.visibility.currentData(),
-                auto_delete_youtube=self.delete_youtube.isChecked(),
+                auto_delete_youtube=True,
                 delete_local_video=self.del_video_chk.isChecked(),
             )
             if self.pass_edit.text():
                 set_zoom_password(user, self.pass_edit.text())
+            if self.bb_pass_edit.text():
+                set_blackboard_password(base, user, self.bb_pass_edit.text())
             updated.save()
             if changed:
                 BB_COOKIES_FILE.unlink(missing_ok=True)

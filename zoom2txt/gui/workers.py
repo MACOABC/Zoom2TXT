@@ -56,39 +56,6 @@ class PipelineWorker(QThread):
             self.failed.emit(str(exc))
 
 
-class DeleteVideoWorker(QThread):
-    """Elimina el video de YouTube tras la transcripción, sin congelar la GUI."""
-
-    log = Signal(str)
-    finished_ok = Signal(bool)  # True si se eliminó, False si falló
-
-    def __init__(self, video_id: str, parent=None):
-        super().__init__(parent)
-        self._video_id = video_id
-
-    def run(self) -> None:
-        try:
-            from zoom2txt.transcription.youtube_engine import (
-                eliminar_video,
-                get_authenticated_service,
-            )
-
-            youtube = get_authenticated_service(CLIENT_SECRETS_FILE, TOKEN_FILE)
-            from zoom2txt.storage import StateStore
-
-            state = StateStore()
-            affected = [j for j in state.list("job") if j.get("video_id") == self._video_id]
-            for job in affected:
-                state.put("job", job["id"], cleanup_pending=True)
-            eliminar_video(youtube, self._video_id, self.log.emit)
-            for job in affected:
-                state.put("job", job["id"], cleanup_pending=False, youtube_deleted=True)
-            self.finished_ok.emit(True)
-        except Exception as exc:  # noqa: BLE001
-            self.log.emit(f"[✕] No se pudo eliminar el video: {exc}")
-            self.finished_ok.emit(False)
-
-
 class ScanWorker(QThread):
     log = Signal(str)
     needs_login = Signal()
@@ -318,119 +285,166 @@ class ScanWorker(QThread):
 
 
 class QueueWorker(QThread):
-    """Procesa en serie una lista de grabaciones con el pipeline
-    completo; opcionalmente elimina cada video de YouTube al terminar."""
+    """Prepare the batch first, then poll pending transcripts in rounds."""
 
     log = Signal(str)
     stage = Signal(int)
-    item_started = Signal(int, str)  # (índice, nombre)
-    item_finished = Signal(int, str)  # (índice, ruta txt o "")
-    all_done = Signal(int, int)  # (ok, fallidas)
+    item_started = Signal(int, str)
+    item_finished = Signal(int, str)
+    item_waiting = Signal(int)
+    all_done = Signal(int, int)
+    poll_interval = 120
+    max_caption_rounds = 105
 
-    def __init__(
-        self,
-        items: list[dict],
-        zoom_password: str,
-        settings: Settings,
-        delete_after: bool,
-        parent=None,
-    ):
+    def __init__(self, items, zoom_password, settings, delete_after=True, parent=None):
         super().__init__(parent)
         self._items = items
-        self._password = zoom_password
         self._settings = settings
-        self._delete_after = delete_after
         self.cancel_event = threading.Event()
 
-    def cancel(self) -> None:
+    def cancel(self):
         self.cancel_event.set()
 
-    def run(self) -> None:
-        from zoom2txt.blackboard.registry import Registry
+    def run(self):
+        from zoom2txt.blackboard.registry import Registry, recording_key
+        from zoom2txt.security import redact
+        from zoom2txt.storage import StateStore
 
         registry = Registry(self._settings)
+        state = StateStore(self._settings)
         seen = set()
+        pending = []
         ok = failed = 0
+        auth_failed = False
+
+        def process(index, item, prepare):
+            self.item_started.emit(index, item["name"])
+            identity = item["course_id"], item["meeting_id"]
+            key = item.get("job_key") or recording_key(*identity)
+            state.put("job", key, course_id=identity[0], meeting_id=identity[1])
+            cookies = item.get("cookies_file")
+            txt, video_id = run_pipeline(
+                item.get("play_url", ""),
+                "",
+                item["name"],
+                self._settings,
+                self.log.emit,
+                self.stage.emit,
+                self.cancel_event,
+                Path(cookies) if cookies else None,
+                job_key=key,
+                auto_recover=prepare,
+                defer_captions=prepare,
+                caption_attempts=1,
+            )
+            job = state.get("job", key)
+            if txt:
+                if job.get("cleanup_pending"):
+                    self.item_finished.emit(index, "")
+                    return "failed"
+                registry.mark_done(*identity, item["name"], Path(txt))
+                self.item_finished.emit(index, str(txt))
+                return "done"
+            if video_id and not self.cancel_event.is_set():
+                self.item_waiting.emit(index)
+                return "waiting"
+            self.item_finished.emit(index, "")
+            return "failed"
+
         for i, item in enumerate(self._items):
             if self.cancel_event.is_set():
                 break
-            identity = (item["course_id"], item["meeting_id"])
+            identity = item["course_id"], item["meeting_id"]
             if identity in seen or registry.is_processed(*identity):
                 continue
             seen.add(identity)
-            self.item_started.emit(i, item["name"])
-            self.log.emit("")
-            self.log.emit(f"══ [{i + 1}/{len(self._items)}] {item['name']} ══")
+            self.log.emit(f"[i] Preparando clase {i + 1}/{len(self._items)}: {item['name']}")
             try:
-                from zoom2txt.blackboard.registry import recording_key
-                from zoom2txt.storage import StateStore
-
-                job_key = item.get("job_key") or recording_key(*identity)
-                StateStore(self._settings).put(
-                    "job", job_key, course_id=identity[0], meeting_id=identity[1]
-                )
-                cookies = item.get("cookies_file")
-                txt, video_id = run_pipeline(
-                    item.get("play_url", ""),
-                    "",
-                    item["name"],
-                    self._settings,
-                    self.log.emit,
-                    self.stage.emit,
-                    self.cancel_event,
-                    Path(cookies) if cookies else None,
-                    job_key=job_key,
-                    auto_recover=True,
-                )
-                if txt:
-                    registry.mark_done(
-                        item["course_id"], item["meeting_id"], item["name"], Path(txt)
-                    )
+                result = process(i, item, True)
+                if result == "waiting":
+                    pending.append((i, item))
+                elif result == "done":
                     ok += 1
-                    from zoom2txt.blackboard.registry import recording_key
-                    from zoom2txt.storage import StateStore
-
-                    state = StateStore(self._settings)
-                    key = item.get("job_key") or recording_key(*identity)
-                    job = state.get("job", key)
-                    if self._delete_after and video_id and job.get("status") == "done":
-                        state.put("job", key, cleanup_pending=True)
-                        if self._delete(video_id):
-                            state.put("job", key, cleanup_pending=False, youtube_deleted=True)
                 else:
                     failed += 1
-                self.item_finished.emit(i, str(txt) if txt else "")
             except DailyLimitReached as exc:
-                self.log.emit("[i] " + str(exc))
+                self.log.emit("[i] " + redact(exc))
                 self.item_finished.emit(i, "")
-                continue
             except AuthorizationRequired as exc:
-                failed += 1
-                self.log.emit(f"[✕] {item['name']}: {exc}")
+                self.log.emit("[!] Reautoriza tu cuenta desde Ajustes. " + redact(exc))
                 self.item_finished.emit(i, "")
-                self.log.emit(
-                    "[!] Tanda detenida por autorización de YouTube. Las demás clases siguen pendientes; no se descargarán hasta resolverla."
-                )
+                failed += 1
+                auth_failed = True
                 break
-            except Exception as exc:  # noqa: BLE001
-                failed += 1
-                self.log.emit(f"[✕] {item['name']}: {exc}")
+            except Exception as exc:
+                self.log.emit(f"[!] {item['name']}: " + redact(exc))
                 self.item_finished.emit(i, "")
+                failed += 1
+
+        # No subtitle wait occurs in the upload pass. Each pending class gets
+        # one check per round, so a slow class cannot monopolize the batch.
+        if pending and not auth_failed and not self.cancel_event.is_set():
+            self.log.emit(
+                "[i] Clases preparadas. Revisando las transcripciones pendientes por turnos."
+            )
+        for attempt in range(self.max_caption_rounds):
+            if not pending or auth_failed or self.cancel_event.is_set():
+                break
+            remaining = []
+            for i, item in pending:
+                if self.cancel_event.is_set() or auth_failed:
+                    remaining.append((i, item))
+                    continue
+                try:
+                    result = process(i, item, False)
+                    if result == "waiting":
+                        remaining.append((i, item))
+                    elif result == "done":
+                        ok += 1
+                    else:
+                        failed += 1
+                except AuthorizationRequired as exc:
+                    self.log.emit("[!] Reautoriza tu cuenta desde Ajustes. " + redact(exc))
+                    remaining.append((i, item))
+                    auth_failed = True
+                except Exception as exc:
+                    self.log.emit(f"[!] {item['name']}: " + redact(exc))
+                    self.item_finished.emit(i, "")
+                    failed += 1
+            pending = remaining
+            if pending and not auth_failed and attempt + 1 < self.max_caption_rounds:
+                self.log.emit(
+                    f"[i] {len(pending)} transcripciones en proceso. Próxima revisión en {self.poll_interval} segundos; puedes pausar."
+                )
+                if self.cancel_event.wait(self.poll_interval):
+                    break
+        for i, _ in pending:
+            self.item_finished.emit(i, "")
         self.all_done.emit(ok, failed)
 
-    def _delete(self, video_id: str) -> bool:
-        try:
-            from zoom2txt.transcription.youtube_engine import (
-                eliminar_video,
-                get_authenticated_service,
-            )
 
-            youtube = get_authenticated_service(CLIENT_SECRETS_FILE, TOKEN_FILE)
-            eliminar_video(youtube, video_id, self.log.emit)
-            return True
-        except Exception as exc:  # noqa: BLE001
-            self.log.emit(f"[✕] Limpieza pendiente del video {video_id}: {exc}")
-            return False
+class CleanupWorker(QThread):
+    """Persistent remote deletion retries while the app is idle."""
+
+    log = Signal(str)
+
+    def __init__(self, settings, parent=None):
+        super().__init__(parent)
+        self.settings = settings
+        self.cancel_event = threading.Event()
+
+    def cancel(self):
+        self.cancel_event.set()
+
+    def run(self):
+        from zoom2txt.core.pipeline import retry_pending_cleanup
+
+        try:
+            retry_pending_cleanup(self.settings, self.log.emit, self.cancel_event)
+        except Exception as exc:
+            from zoom2txt.security import redact
+
+            self.log.emit("[!] Limpieza pendiente: " + redact(exc))
 
 
 class MaterialScanWorker(QThread):
@@ -610,12 +624,13 @@ class RecoveryWorker(QThread):
 
     def run(self):
         from zoom2txt.config import DATA_DIR
-        from zoom2txt.core.pipeline import retry_pending_copies
+        from zoom2txt.core.pipeline import retry_pending_cleanup, retry_pending_copies
         from zoom2txt.security import read_private_json, redact
         from zoom2txt.storage import StateStore
 
         try:
             if self.job is None:
+                retry_pending_cleanup(self.settings, self.log.emit, self.cancel_event)
                 retry_pending_copies(self.settings, self.log.emit, self.cancel_event)
                 self.result.emit(
                     "Revisión de copias terminada. Consulta el historial para ver pendientes."
@@ -646,7 +661,11 @@ class RecoveryWorker(QThread):
                 cookies if cookies.exists() else None,
                 job_key=key,
             )
-            if txt and self.job.get("course_id"):
+            if (
+                txt
+                and not state.get("job", key).get("cleanup_pending")
+                and self.job.get("course_id")
+            ):
                 from zoom2txt.blackboard.registry import Registry
 
                 Registry(self.settings).mark_done(
@@ -655,24 +674,10 @@ class RecoveryWorker(QThread):
                     self.job["display_name"],
                     txt,
                 )
-            if (
-                txt
-                and self.job.get("cleanup_pending")
-                and state.get("job", key).get("status") == "done"
-            ):
-                from zoom2txt.transcription.youtube_engine import (
-                    eliminar_video,
-                    get_authenticated_service,
-                )
-
-                eliminar_video(
-                    get_authenticated_service(CLIENT_SECRETS_FILE, TOKEN_FILE),
-                    vid,
-                    self.log.emit,
-                )
-                state.put("job", key, cleanup_pending=False, youtube_deleted=True)
             self.result.emit(
-                "Transcripción recuperada." if txt else "Trabajo pendiente; la subida se conserva."
+                "Transcripción recuperada."
+                if txt and not state.get("job", key).get("cleanup_pending")
+                else "Trabajo pendiente; consulta Historial para continuar."
             )
         except Exception as exc:
             name = (

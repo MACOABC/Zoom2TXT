@@ -16,6 +16,30 @@ from zoom2txt.security import secure_keyring
 _SERVICE = APP_NAME
 
 
+def _blackboard_key(base_url, user):
+    import hashlib
+
+    return "blackboard:" + hashlib.sha256((base_url.rstrip("/") + "\n" + user).encode()).hexdigest()
+
+
+def set_blackboard_password(base_url, user, password):
+    secure_keyring().set_password(_SERVICE, _blackboard_key(base_url, user), password)
+
+
+def get_blackboard_password(base_url, user):
+    try:
+        return secure_keyring().get_password(_SERVICE, _blackboard_key(base_url, user))
+    except (KeyringError, RuntimeError):
+        return None
+
+
+def delete_blackboard_password(base_url, user):
+    try:
+        secure_keyring().delete_password(_SERVICE, _blackboard_key(base_url, user))
+    except (KeyringError, RuntimeError):
+        pass
+
+
 def set_zoom_password(user: str, password: str) -> None:
     secure_keyring().set_password(_SERVICE, user, password)
 

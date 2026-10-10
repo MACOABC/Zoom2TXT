@@ -17,6 +17,7 @@ from zoom2txt.security import read_private_json, redact, write_private_json
 from zoom2txt.storage import StateStore, digest, file_ok, safe_name
 from zoom2txt.transcription.youtube_engine import (
     descargar_subtitulos,
+    eliminar_video,
     get_authenticated_service,
     subir_a_youtube,
 )
@@ -30,9 +31,9 @@ Log = Callable[[str], None]
 Stage = Callable[[int], None]
 STAGES = [
     "Descarga de Zoom",
-    "Subida a YouTube",
-    "Subtítulos automáticos",
-    "TXT verificado",
+    "Preparando transcripción",
+    "Procesando transcripción",
+    "Verificando texto y limpieza",
 ]
 
 
@@ -48,6 +49,8 @@ def run_pipeline(
     job_key=None,
     auto_recover=False,
     _restarted=False,
+    defer_captions=False,
+    caption_attempts=105,
 ):
     store = StateStore(settings)
     key = job_key or hashlib.sha256(zoom_url.encode()).hexdigest()[:24]
@@ -276,10 +279,16 @@ def run_pipeline(
                             job_key=key,
                             auto_recover=True,
                             _restarted=True,
+                            defer_captions=defer_captions,
+                            caption_attempts=caption_attempts,
                         )
                     raise
                 store.put("job", key, status="uploaded", video_id=video_id)
             if cancel.is_set():
+                return None, video_id
+            if defer_captions:
+                store.put("job", key, status="waiting_captions", error="")
+                log("[i] Clase preparada. Se continúa con las demás mientras se genera el texto.")
                 return None, video_id
             on_stage(2)
             youtube = youtube or get_authenticated_service(CLIENT_SECRETS_FILE, TOKEN_FILE)
@@ -326,15 +335,39 @@ def run_pipeline(
                 youtube=youtube,
                 private=is_private,
                 store=store,
+                max_attempts=caption_attempts,
             )
             if txt is None:
                 return None, video_id
-            store.put("job", key, status="transcribed", txt=str(txt), txt_hash=digest(txt))
+            store.put(
+                "job",
+                key,
+                status="cleanup_pending",
+                txt=str(txt),
+                txt_hash=digest(txt),
+                cleanup_pending=bool(video_id),
+            )
         on_stage(3)
+        if not file_ok(txt, store.get("job", key).get("txt_hash", "")):
+            raise ValueError("No hay un TXT íntegro verificado. No se eliminará el video remoto.")
         if txt and row.get("txt"):
             log(
                 "[+] TXT existente verificado. Se completa el registro sin descargar ni subir otra vez."
             )
+        # A verified local TXT is enough to remove the remote recording.
+        # An unavailable optional copy must never extend remote retention.
+        if video_id and not store.get("job", key).get("youtube_deleted"):
+            store.put("job", key, status="cleanup_pending", cleanup_pending=True)
+            try:
+                youtube = youtube or get_authenticated_service(CLIENT_SECRETS_FILE, TOKEN_FILE)
+                eliminar_video(youtube, video_id, log)
+            except Exception as exc:
+                store.put("job", key, error=redact(str(exc)))
+                log(
+                    "[!] Texto guardado; eliminación remota pendiente. Se reintentará automáticamente."
+                )
+                return txt, video_id
+            store.put("job", key, cleanup_pending=False, youtube_deleted=True, error="")
         synced = _post_proceso(txt, mp4, settings, log)
         store.put(
             "job",
@@ -432,3 +465,44 @@ def retry_pending_copies(settings, log, cancel):
         video = Path(row["video"]) if row.get("video") else None
         if _post_proceso(txt, video, settings, log):
             store.put("job", row["id"], status="done", sync_local=True, error="")
+
+
+def retry_pending_cleanup(settings, log, cancel):
+    """Retry only app-owned jobs with a verified transcript and pending deletion."""
+    store = StateStore(settings)
+    for row in store.list("job"):
+        if cancel.is_set():
+            break
+        if not row.get("cleanup_pending") or row.get("youtube_deleted"):
+            continue
+        txt = Path(row.get("txt", ""))
+        if not file_ok(txt, row.get("txt_hash", "")):
+            log("[!] No se puede completar la limpieza: falta el TXT íntegro de esta clase.")
+            continue
+        try:
+            # Reuse the normal completion path: it never reuploads a verified TXT.
+            result, _ = run_pipeline(
+                "",
+                "",
+                row.get("display_name", row.get("name", "Clase")),
+                settings,
+                log,
+                lambda _: None,
+                cancel,
+                job_key=row["id"],
+            )
+            if (
+                result
+                and not store.get("job", row["id"]).get("cleanup_pending")
+                and row.get("course_id")
+            ):
+                from zoom2txt.blackboard.registry import Registry
+
+                Registry(settings).mark_done(
+                    row["course_id"],
+                    row["meeting_id"],
+                    row.get("display_name", row.get("name", "Clase")),
+                    result,
+                )
+        except Exception as exc:
+            log("[!] Limpieza pendiente: " + redact(exc))

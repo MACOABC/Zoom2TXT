@@ -82,7 +82,7 @@ class Settings:
     sub_lang: str = "es"
     wizard_done: bool = False
     blackboard_url: str = DEFAULT_BLACKBOARD_URL
-    auto_delete_youtube: bool = False
+    auto_delete_youtube: bool = True
     term_start: str = ""  # 'YYYY-MM-DD' del lunes de la Semana 1
     theme: str = "dark"  # 'dark' | 'light'
     # Carpeta compartida PC↔celular en Google Drive ('' = desactivado)
@@ -146,9 +146,7 @@ class Settings:
                 sub_lang=str(raw.get("sub_lang", "es")),
                 wizard_done=flag("wizard_done"),
                 blackboard_url=base,
-                auto_delete_youtube=flag("auto_delete_youtube")
-                if raw.get("schema_version") == 2
-                else False,
+                auto_delete_youtube=True,
                 term_start=str(raw.get("term_start", "")),
                 theme="light" if raw.get("theme") == "light" else "dark",
                 drive_dir=str(folder("drive_dir", "")),
@@ -217,12 +215,6 @@ def credentials_status(settings: Settings) -> list[str]:
         missing.append("blackboard")
     if not settings.wizard_done or not settings.zoom_user:
         missing.append("zoom")
-    else:
-        # La contraseña vive en el keyring del SO, nunca en archivos.
-        from zoom2txt.auth.credentials import get_zoom_password
-
-        if get_zoom_password(settings.zoom_user) is None:
-            missing.append("zoom")
     if not CLIENT_SECRETS_FILE.exists() or not validate_client_secrets(CLIENT_SECRETS_FILE)[0]:
         missing.append("client_secrets")
     else:

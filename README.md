@@ -21,7 +21,7 @@ Zoom2TXT convierte un flujo académico repetitivo en una aplicación de escritor
 - Trabajos recuperables: una interrupción no obliga a descargar ni subir nuevamente lo ya confirmado.
 - Detección de duplicados, selección del MP4 sobre audio separado y organización por curso/semana.
 - Estados explícitos para descarga, subida, procesamiento de subtítulos y verificación del TXT.
-- Una suite de **148 pruebas automatizadas** con HTTP real bloqueado durante los tests.
+- Una suite de **168 pruebas automatizadas** con HTTP real bloqueado durante los tests.
 
 ## Demo segura, sin credenciales
 
@@ -52,6 +52,10 @@ flowchart LR
     G --> H[TXT verificado]
     H --> I[Biblioteca / NotebookLM]
 ```
+
+La tanda prepara primero todas las grabaciones admitidas sin esperar a los subtítulos de cada una. Luego consulta las transcripciones pendientes por turnos: una clase lenta no bloquea las demás. Pausar conserva los IDs confirmados y evita repetir subidas.
+
+El video remoto se elimina obligatoriamente después de guardar y verificar el TXT. Si falla la eliminación, el trabajo queda pendiente y se reintenta al abrir la app y cada dos minutos mientras esté libre. Una carpeta de copia opcional desconectada no retrasa el borrado remoto. Las clases que aún no ofrecen subtítulos conservan su video para poder continuar; la eliminación requiere un TXT íntegro. La copia local del MP4 se controla por separado.
 
 Cada etapa persiste solo el estado necesario para poder continuar. Antes de repetir una subida incierta, la app revisa el canal y conserva el trabajo cuando la respuesta no es concluyente.
 
@@ -86,8 +90,8 @@ En Linux, activa el entorno con `source .venv/bin/activate`. La versión publica
 Para usar cuentas reales, ejecuta `python main.py`. El asistente solicita:
 
 1. La URL HTTPS del Blackboard de la institución.
-2. El usuario y la contraseña institucional de Zoom; la contraseña va al keyring del SO.
-3. Un `client_secrets.json` creado por el propio usuario como credencial OAuth de escritorio.
+2. El usuario de Blackboard y, opcionalmente, su contraseña para el formulario nativo; la contraseña va al keyring del SO. SSO, MFA o CAPTCHA se completan en la página del campus. La clave de una grabación de Zoom solo se necesita en modo manual, si el enlace la exige.
+3. Un JSON OAuth de escritorio creado por el propio usuario. El asistente explica los seis pasos de Google Cloud, incluido agregar el propio correo como usuario de prueba aunque sea el creador del proyecto.
 4. Autorización de su propia cuenta de YouTube y carpetas locales de trabajo.
 
 `client_secrets.json`, `token.json`, cookies, configuraciones, videos y transcripciones se guardan en la carpeta de datos del usuario, no en el repositorio.

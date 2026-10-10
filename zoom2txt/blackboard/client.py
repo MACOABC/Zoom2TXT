@@ -159,9 +159,23 @@ class BlackboardClient:
                 timeout=25,
                 allow_redirects=False,
             )
-            return r.status_code == 200 and isinstance(r.json(), dict) and bool(r.json().get("id"))
-        except (requests.RequestException, ValueError):
+        except requests.RequestException as exc:
+            raise BlackboardError(
+                "No se pudo conectar con Blackboard. Revisa tu conexión y vuelve a buscar; no necesitas volver a escribir tu contraseña por un fallo de red."
+            ) from exc
+        if r.status_code in (401, 403, 301, 302, 303, 307, 308):
             return False
+        if r.status_code != 200:
+            raise BlackboardError(
+                f"Blackboard respondió {r.status_code}. Vuelve a intentar la búsqueda; se conserva tu sesión."
+            )
+        try:
+            data = r.json()
+        except ValueError as exc:
+            raise BlackboardError(
+                "Blackboard no devolvió una respuesta de sesión válida. Vuelve a intentar."
+            ) from exc
+        return isinstance(data, dict) and bool(data.get("id"))
 
     # ── Cursos ────────────────────────────────────────────────────
     def get_current_courses(self) -> list[dict]:

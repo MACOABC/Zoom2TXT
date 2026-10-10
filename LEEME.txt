@@ -1,4 +1,4 @@
-ZOOM2TXT 2.6.0 — INSTALACIÓN EN WINDOWS
+ZOOM2TXT 2.7.1 — INSTALACIÓN EN WINDOWS
 ========================================
 
 1. Extrae el ZIP completo en una carpeta propia.
@@ -34,3 +34,17 @@ Desde el código fuente ejecuta: python main.py --demo
 El demo es local, usa datos ficticios y no se conecta a servicios externos.
 
 Más documentación: https://github.com/MACOABC/Zoom2TXT
+
+NOVEDADES DE 2.7.1
+-----------------
+- Configuración de Google Cloud guiada en seis pasos. Agrega tu correo como
+  usuario de prueba aunque seas el autor del proyecto.
+- Conecta Blackboard una vez; se reutiliza la sesión mientras sea válida.
+  La contraseña opcional del campus es distinta de la clave de una grabación.
+  Los accesos SSO o con MFA pueden necesitar una comprobación institucional.
+- Se prepara la tanda completa y luego se revisan las transcripciones por
+  turnos. Una clase lenta no impide preparar las demás.
+- Tras verificar el TXT se elimina obligatoriamente el video remoto.
+  Si falla la conexión, la eliminación queda pendiente y se reintenta al
+  abrir la app y periódicamente mientras no haya otro trabajo activo.
+- Puedes pausar y continuar sin repetir las subidas confirmadas.

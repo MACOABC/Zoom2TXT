@@ -120,7 +120,7 @@ def subir_a_youtube(
     log(
         "[*] Recuperando la sesión de subida existente; no se crea otro video…"
         if resuming
-        else "[*] Subiendo a YouTube como " + ("privado" if private else "no listado") + "…"
+        else "[*] Preparando la transcripción de la clase…"
     )
     body = {
         "snippet": {
@@ -193,12 +193,12 @@ def _complete_resumable_upload(request, log, cancel, checkpoint):
         if progress:
             percent = int(progress.progress() * 100)
             if percent // 10 > last_percent // 10:
-                log(f"[*] Subida: {percent}% confirmado por YouTube.")
+                log(f"[*] Preparación: {percent}% confirmado.")
                 last_percent = percent
     video_id = response["id"]
     if checkpoint is not None:
         checkpoint["save"](video_id=video_id, status="uploaded", upload_uri="")
-    log(f"[+] Video subido: https://youtu.be/{video_id}")
+    log("[+] Clase preparada. La generación del texto continúa en segundo plano.")
     return video_id
 
 
