@@ -23,7 +23,7 @@ dependencies = [
   "keyring==25.7.0",
   "platformdirs==4.10.0",
   "google-api-python-client==2.198.0",
-  "google-auth==2.55.1",
+  "google-auth==2.58.1",
   "google-auth-oauthlib==1.4.0",
   "cryptography==50.0.0",
   "tzdata==2026.3",
