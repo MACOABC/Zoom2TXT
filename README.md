@@ -1,5 +1,7 @@
 # Zoom2TXT
 
+![Portada de Zoom2TXT](docs/images/zoom2txt-cover.png)
+
 **Automatización de grabaciones académicas: Blackboard → Zoom → YouTube → TXT.**
 
 [![CI](https://github.com/MACOABC/Zoom2TXT/actions/workflows/ci.yml/badge.svg)](https://github.com/MACOABC/Zoom2TXT/actions/workflows/ci.yml)
