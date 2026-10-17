@@ -10,6 +10,7 @@
 - Los cursos se conservan para la próxima apertura. Si un curso deja de estar disponible, la búsqueda avisa y no pasa a todos los cursos.
 - Demostración sin conexión compatible con la selección de cursos y semanas.
 - Pruebas de regresión para aislamiento por ID, semanas, tandas, sesiones caducadas y recuperación local.
+- Cierre de la comprobación del ejecutable sin ejecutar callbacks pendientes sobre controles que se están eliminando.
 
 ## 2.7.1 — Recuperación del acceso guardado
 

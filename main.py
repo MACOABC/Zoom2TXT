@@ -163,9 +163,11 @@ def main() -> int:
         atomic_write(target, json.dumps(result, indent=2))
         if getattr(window, "tray", None):
             window.tray.hide()
-        dialog.deleteLater()
-        window.deleteLater()
-        app.processEvents()
+        # Do not dispatch queued startup callbacks while deleting their widgets.
+        # The hidden self-test never enters the normal application event loop.
+        window._closing = True
+        dialog.close()
+        window.close()
         return 0 if passed else 1
 
     install_exception_handler(app)
