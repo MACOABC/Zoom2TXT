@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.8.0 — Búsqueda de grabaciones por curso
+
+- Selector de un curso o todos los cursos en la pantalla Clases.
+- Actualización de cursos desde Blackboard sin abrir Zoom ni preparar grabaciones.
+- El curso elegido se filtra antes de consultar Zoom y aplicar los límites de la tanda.
+- El filtro por curso se puede combinar con una o varias semanas; sin semanas se revisa el ciclo configurado.
+- Al cambiar de curso se retiran los resultados anteriores y se muestran solo sus trabajos guardados.
+- Los cursos se conservan para la próxima apertura. Si un curso deja de estar disponible, la búsqueda avisa y no pasa a todos los cursos.
+- Demostración sin conexión compatible con la selección de cursos y semanas.
+- Pruebas de regresión para aislamiento por ID, semanas, tandas, sesiones caducadas y recuperación local.
+
 ## 2.7.1 — Recuperación del acceso guardado
 
 - La ventana de acceso explica cuándo todavía falta la credencial de Blackboard.

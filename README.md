@@ -23,7 +23,7 @@ Zoom2TXT convierte un flujo académico repetitivo en una aplicación de escritor
 - Trabajos recuperables: una interrupción no obliga a descargar ni subir nuevamente lo ya confirmado.
 - Detección de duplicados, selección del MP4 sobre audio separado y organización por curso/semana.
 - Estados explícitos para descarga, subida, procesamiento de subtítulos y verificación del TXT.
-- Una suite de **168 pruebas automatizadas** con HTTP real bloqueado durante los tests.
+- Una suite de **181 pruebas automatizadas** con HTTP real bloqueado durante los tests.
 
 ## Demo segura, sin credenciales
 
@@ -42,6 +42,8 @@ La demostración permite revisar el inventario, simular el pipeline y abrir la b
 ![Biblioteca de transcripciones sintéticas](docs/images/demo-library.png)
 
 ## Flujo
+
+En **Clases**, pulsa **Actualizar cursos**, elige el curso en el selector y pulsa **Buscar clases nuevas**. La app consulta únicamente las grabaciones pendientes de ese curso. **Todos los cursos** mantiene la búsqueda conjunta. Puedes combinar el curso con **Filtrar por semana del ciclo**; sin ese filtro se revisan las semanas del ciclo configurado. Se mantienen los límites de la tanda y de clases nuevas al día.
 
 ```mermaid
 flowchart LR

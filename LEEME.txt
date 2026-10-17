@@ -1,4 +1,4 @@
-ZOOM2TXT 2.7.1 — INSTALACIÓN EN WINDOWS
+ZOOM2TXT 2.8.0 — INSTALACIÓN EN WINDOWS
 ========================================
 
 1. Extrae el ZIP completo en una carpeta propia.
@@ -35,7 +35,14 @@ El demo es local, usa datos ficticios y no se conecta a servicios externos.
 
 Más documentación: https://github.com/MACOABC/Zoom2TXT
 
-NOVEDADES DE 2.7.1
+NOVEDADES DE 2.8.0
+-----------------
+- En Clases, pulsa Actualizar cursos, elige un curso y pulsa Buscar clases
+  nuevas. Solo se revisan las grabaciones pendientes del curso elegido.
+- Todos los cursos permite buscar conjuntamente. Puedes combinar el curso
+  con una o varias semanas; sin semanas se revisa el ciclo configurado.
+
+MEJORAS ANTERIORES
 -----------------
 - Configuración de Google Cloud guiada en seis pasos. Agrega tu correo como
   usuario de prueba aunque seas el autor del proyecto.

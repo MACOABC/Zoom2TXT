@@ -62,6 +62,7 @@ class DemoMainWindow(MainWindow):
         self._demo_position = 0
         self._demo_stage = 0
         super().__init__(settings)
+        self._refresh_courses()
         self.setWindowTitle("Zoom2TXT · Demostración")
         self.settings_btn.setEnabled(False)
         self.settings_btn.setToolTip("Las cuentas están desactivadas en la demostración.")
@@ -89,10 +90,27 @@ class DemoMainWindow(MainWindow):
     def _scan(self) -> None:
         self._show_demo_inventory()
 
+    def _refresh_courses(self):
+        self._set_courses(
+            [{"id": f"demo-course-{i}", "name": name} for i, name in enumerate(DEMO_COURSES, 1)]
+        )
+
     def _show_demo_inventory(self) -> None:
         self._reset_stages()
         self.console.clear()
-        self._on_scan_found(demo_recordings())
+        course_id = self.course_combo.currentData()
+        ranges = self._selected_week_ranges()
+        if self.weeks_chk.isChecked() and not ranges:
+            self.scan_status.setText("Marca al menos una semana, o desactiva el filtro por semana.")
+            return
+        self._on_scan_found(
+            [
+                item
+                for item in demo_recordings()
+                if (course_id is None or item["course_id"] == course_id)
+                and (not ranges or any(lo <= item["sort_key"][:10] <= hi for lo, hi in ranges))
+            ]
+        )
         self.scan_btn.setText("Reiniciar demostración")
         self.process_btn.setText("Simular flujo completo")
         self.skip_all_btn.hide()
@@ -128,6 +146,7 @@ class DemoMainWindow(MainWindow):
         self.table.setEnabled(False)
         self.scan_btn.setEnabled(False)
         self.process_btn.setEnabled(False)
+        self.course_controls.setEnabled(False)
         self._advance_demo()
 
     def _advance_demo(self) -> None:
@@ -180,6 +199,7 @@ class DemoMainWindow(MainWindow):
         self.open_btn.show()
         self.table.setEnabled(True)
         self.scan_btn.setEnabled(True)
+        self.course_controls.setEnabled(True)
         self.process_btn.setEnabled(True)
         self.process_btn.hide()
         self.scan_status.setText(

@@ -22,10 +22,12 @@ def continuation_data(settings, key):
     )
 
 
-def local_continuations(settings, ranges=()):
+def local_continuations(settings, ranges=(), *, course_id=None):
     ledger = WorkLedger(settings)
     result = []
     for record in ledger.pending():
+        if course_id is not None and record["course_id"] != course_id:
+            continue
         stamp = record["start_time"]
         if ranges and not any(lo <= stamp[:10] <= hi for lo, hi in ranges):
             continue

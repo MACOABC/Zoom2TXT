@@ -12,6 +12,7 @@ from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
+    QComboBox,
     QFrame,
     QGridLayout,
     QHBoxLayout,
@@ -39,6 +40,7 @@ from zoom2txt.gui.settings_dialog import SettingsDialog
 from zoom2txt.gui.setup_wizard import SetupWizard
 from zoom2txt.gui.workers import (
     CleanupWorker,
+    CourseListWorker,
     MaterialDownloadWorker,
     MaterialScanWorker,
     PipelineWorker,
@@ -94,6 +96,9 @@ class MainWindow(QMainWindow):
         self.settings = settings
         self.worker: PipelineWorker | None = None
         self.scan_worker: ScanWorker | None = None
+        self.course_worker: CourseListWorker | None = None
+        self._course_login_pending = False
+        self._scan_login_pending = False
         self.queue_worker: QueueWorker | None = None
         self.mat_scan_worker: MaterialScanWorker | None = None
         self.mat_dl_worker: MaterialDownloadWorker | None = None
@@ -378,6 +383,7 @@ class MainWindow(QMainWindow):
             "Busca en tu Blackboard las grabaciones que aún no has transcrito."
         )
         self.scan_status.setObjectName("muted")
+        self.scan_status.setTextFormat(Qt.TextFormat.PlainText)
         self.scan_status.setWordWrap(True)
         top.addWidget(self.scan_btn)
         top.addSpacing(12)
@@ -393,6 +399,36 @@ class MainWindow(QMainWindow):
         notice_row.addWidget(self.backlog_notice, 1)
         notice_row.addWidget(backlog_btn)
         lay.addLayout(notice_row)
+
+        self.course_controls = QWidget()
+        course_row = QHBoxLayout(self.course_controls)
+        course_row.setContentsMargins(0, 0, 0, 0)
+        course_label = QLabel("Curso")
+        self.course_combo = QComboBox()
+        self.course_combo.setAccessibleName("Curso para buscar grabaciones")
+        self.course_combo.setMinimumWidth(200)
+        self.course_combo.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+        )
+        self.course_combo.setMinimumContentsLength(24)
+        self.course_combo.addItem("Todos los cursos", None)
+        course_label.setBuddy(self.course_combo)
+        self.courses_btn = QPushButton("Actualizar cursos")
+        self.courses_btn.clicked.connect(self._refresh_courses)
+        course_row.addWidget(course_label)
+        course_row.addWidget(self.course_combo, 1)
+        course_row.addWidget(self.courses_btn)
+        lay.addWidget(self.course_controls)
+        self.course_hint = QLabel(
+            "Elige un curso o busca en todos. Puedes combinarlo con el filtro por semana."
+        )
+        self.course_hint.setObjectName("muted")
+        self.course_hint.setWordWrap(True)
+        lay.addWidget(self.course_hint)
+        from zoom2txt.workflow import WorkLedger
+
+        self._set_courses(WorkLedger(self.settings).course_choices())
+        self.course_combo.currentIndexChanged.connect(self._on_course_changed)
 
         # ── Filtro por semanas académicas ─────────────────────────
         self.weeks_box = QFrame()
@@ -617,7 +653,7 @@ class MainWindow(QMainWindow):
         )
         self.page_subtitle.setText(
             [
-                "Selecciona las semanas y revisa qué grabaciones faltan.",
+                "Elige un curso y, si quieres, filtra por semanas para buscar tus grabaciones.",
                 "Procesa un enlace de Zoom con recuperación si algo se interrumpe.",
                 "Adjuntos verificados. Los recursos no exportables se indican por separado.",
                 "Tus transcripciones en disco, organizadas para volver a ellas.",
@@ -697,7 +733,80 @@ class MainWindow(QMainWindow):
                 "No se pudo leer el inventario local. Vuelve a buscar; no se han borrado tus clases."
             )
 
-    # ── Semanas académicas ────────────────────────────────────────
+    # ── Cursos y semanas académicas ───────────────────────────────
+    def _set_courses(self, courses):
+        previous = self.course_combo.currentData()
+        previous_name = self.course_combo.currentText()
+        self.course_combo.blockSignals(True)
+        try:
+            self.course_combo.clear()
+            self.course_combo.addItem("Todos los cursos", None)
+            for course in sorted(courses, key=lambda c: c["name"].casefold()):
+                self.course_combo.addItem(course["name"], course["id"])
+                self.course_combo.setItemData(
+                    self.course_combo.count() - 1, course["name"], Qt.ItemDataRole.ToolTipRole
+                )
+            index = self.course_combo.findData(previous)
+            if previous is not None and index < 0:
+                # Keep the scope explicit until the user chooses another course.
+                self.course_combo.addItem(
+                    previous_name.removesuffix(" (no disponible)") + " (no disponible)", previous
+                )
+                index = self.course_combo.count() - 1
+            self.course_combo.setCurrentIndex(max(0, index))
+        finally:
+            self.course_combo.blockSignals(False)
+        self.course_combo.setToolTip(self.course_combo.currentText())
+        self.course_hint.setText(
+            f"{len(courses)} cursos del ciclo disponibles. El filtro por semana es opcional."
+            if courses
+            else "Pulsa Actualizar cursos para cargar los cursos de tu Blackboard."
+        )
+
+    def _on_course_changed(self):
+        self.course_combo.setToolTip(self.course_combo.currentText())
+        self._scan_items = []
+        self._pending_backlog = 0
+        self.scan_worker = None
+        self.table.setRowCount(0)
+        self.table.hide()
+        self.class_detail.hide()
+        self.process_btn.hide()
+        self.skip_all_btn.hide()
+        scope = self.course_combo.currentText()
+        self.scan_status.setText(f"Pulsa Buscar clases nuevas para revisar: {scope}.")
+        self._load_saved_work()
+
+    def _refresh_courses(self):
+        if self._closing or self._busy():
+            return
+        self.course_controls.setEnabled(False)
+        self.scan_btn.setEnabled(False)
+        self.course_hint.setText("Cargando cursos de Blackboard…")
+        self._course_login_pending = False
+        self.course_worker = CourseListWorker(self.settings, self)
+        self.course_worker.log.connect(self._log)
+        self.course_worker.found.connect(self._set_courses)
+        self.course_worker.failed.connect(self._on_courses_failed)
+        self.course_worker.needs_login.connect(self._request_course_login)
+        self.course_worker.finished.connect(self._courses_finished)
+        self.course_worker.start()
+
+    def _request_course_login(self):
+        self._course_login_pending = True
+
+    def _courses_finished(self):
+        self.course_controls.setEnabled(True)
+        self.scan_btn.setEnabled(True)
+        if self._course_login_pending and not self._closing:
+            self._course_login_pending = False
+            self.course_hint.setText("Conecta Blackboard para cargar tus cursos.")
+            self._connect_blackboard(self._refresh_courses)
+
+    def _on_courses_failed(self, error):
+        self.course_hint.setText("No se pudieron actualizar los cursos. Vuelve a intentar.")
+        self._log("[!] Cursos: " + error)
+
     def _term_monday(self):
         return wk.parse_start(self.settings.term_start)
 
@@ -919,6 +1028,7 @@ class MainWindow(QMainWindow):
     def _busy(self) -> bool:
         for w in (
             self.worker,
+            self.course_worker,
             self.scan_worker,
             self.queue_worker,
             self.mat_scan_worker,
@@ -1073,17 +1183,34 @@ class MainWindow(QMainWindow):
             self.scan_btn.setEnabled(True)
             self.scan_status.setText("Marca al menos una semana, o desactiva el filtro por semana.")
             return
-        self.scan_worker = ScanWorker(self.settings, ranges, self)
+        self.scan_worker = ScanWorker(
+            self.settings, ranges, self, course_id=self.course_combo.currentData()
+        )
+        self.course_controls.setEnabled(False)
+        self.weeks_box.setEnabled(False)
+        self._scan_login_pending = False
         self._scan_items = []
         self.table.hide()
         self.process_btn.hide()
         self.skip_all_btn.hide()
         self.scan_worker.log.connect(self._log)
-        self.scan_worker.needs_login.connect(self._on_needs_login)
+        self.scan_worker.needs_login.connect(self._request_scan_login)
+        self.scan_worker.courses_loaded.connect(self._set_courses)
         self.scan_worker.found.connect(self._on_scan_found)
         self.scan_worker.capped.connect(self._on_scan_capped)
         self.scan_worker.failed.connect(self._on_scan_failed)
+        self.scan_worker.finished.connect(self._scan_finished)
         self.scan_worker.start()
+
+    def _request_scan_login(self):
+        self._scan_login_pending = True
+
+    def _scan_finished(self):
+        self.course_controls.setEnabled(True)
+        self.weeks_box.setEnabled(True)
+        if self._scan_login_pending and not self._closing:
+            self._scan_login_pending = False
+            self._on_needs_login()
 
     def _on_scan_capped(self, shown: int, total: int) -> None:
         self._pending_backlog = total - shown
@@ -1096,6 +1223,9 @@ class MainWindow(QMainWindow):
         self.scan_status.setText(
             "Reconectando Blackboard; la sesión anterior caducó o aún no se ha configurado."
         )
+        self._connect_blackboard(self._scan)
+
+    def _connect_blackboard(self, retry):
         from zoom2txt.blackboard.client import BlackboardClient
         from zoom2txt.gui.login_webview import BlackboardLoginDialog
 
@@ -1103,9 +1233,13 @@ class MainWindow(QMainWindow):
             self.settings.blackboard_url, self, user=self.settings.zoom_user
         )
         if dialog.exec() == dialog.DialogCode.Accepted:
-            BlackboardClient(self.settings.blackboard_url, self._log).store_cookies(dialog.cookies)
+            client = BlackboardClient(self.settings.blackboard_url, self._log)
+            try:
+                client.store_cookies(dialog.cookies)
+            finally:
+                client.session.close()
             self._log("[+] Sesión de Blackboard guardada.")
-            self._scan()
+            retry()
 
     def _on_scan_found(self, items: list) -> None:
         self.scan_btn.setEnabled(True)
@@ -1135,8 +1269,9 @@ class MainWindow(QMainWindow):
         self.class_detail.setText("Selecciona una fila para ver el detalle de su estado.")
         self.process_btn.show()
         self.skip_all_btn.show()
+        ready = "1 clase lista." if len(items) == 1 else f"{len(items)} clases listas."
         self.scan_status.setText(
-            f"{len(items)} clases listas. La app comprobará YouTube y reutilizará tus archivos al continuar."
+            ready + " La app comprobará YouTube y reutilizará tus archivos al continuar."
             + (
                 " Revisión parcial: consulta Actividad."
                 if getattr(self.scan_worker, "partial_errors", [])
@@ -1179,7 +1314,10 @@ class MainWindow(QMainWindow):
         from zoom2txt.work_items import local_continuations
 
         try:
-            items = local_continuations(self.settings, self._selected_week_ranges())
+            course_id = self.course_combo.currentData()
+            items = local_continuations(
+                self.settings, self._selected_week_ranges(), course_id=course_id
+            )
             if items:
                 self._on_scan_found(items)
                 self.skip_all_btn.hide()
@@ -1335,6 +1473,9 @@ class MainWindow(QMainWindow):
             if self.table.item(row, 0).checkState() != Qt.CheckState.Checked:
                 continue
             item = dict(self._scan_items[row])
+            course_id = self.course_combo.currentData()
+            if course_id is not None and item["course_id"] != course_id:
+                continue
             if ranges and not any(lo <= item["start_time"][:10] <= hi for lo, hi in ranges):
                 continue
             nombre = self.table.item(row, 2).text().strip()
@@ -1372,6 +1513,7 @@ class MainWindow(QMainWindow):
         self.cancel_queue_btn.show()
         self.scan_btn.setEnabled(False)
         self.settings_btn.setEnabled(False)
+        self.course_controls.setEnabled(False)
 
         self.queue_worker = QueueWorker(
             selected, password, self.settings, self.delete_chk.isChecked(), self
@@ -1409,6 +1551,7 @@ class MainWindow(QMainWindow):
         self.cancel_queue_btn.setEnabled(True)
         self.scan_btn.setEnabled(True)
         self.settings_btn.setEnabled(True)
+        self.course_controls.setEnabled(True)
         self._log("")
         self._log("============================================")
         self._log(
@@ -1587,6 +1730,7 @@ class MainWindow(QMainWindow):
                 self.setEnabled(False)
                 for worker in (
                     self.worker,
+                    self.course_worker,
                     self.queue_worker,
                     self.scan_worker,
                     self.mat_scan_worker,

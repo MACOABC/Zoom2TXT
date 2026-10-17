@@ -114,8 +114,15 @@ class WorkLedger:
             "meta",
             "current_courses",
             ids=[c["id"] for c in courses],
+            choices=[{"id": c["id"], "name": c["name"]} for c in courses],
             term_start=self.settings.term_start,
         )
+
+    def course_choices(self):
+        meta = self.store.get("meta", "current_courses")
+        if meta.get("term_start") != self.settings.term_start:
+            return []
+        return meta.get("choices") or [{"id": c["id"], "name": c["name"]} for c in self.courses()]
 
     def courses(self):
         meta = self.store.get("meta", "current_courses")

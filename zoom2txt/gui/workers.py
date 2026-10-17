@@ -56,17 +56,57 @@ class PipelineWorker(QThread):
             self.failed.emit(str(exc))
 
 
+class CourseListWorker(QThread):
+    """Load course choices without launching Zoom or preparing recordings."""
+
+    log = Signal(str)
+    needs_login = Signal()
+    found = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, settings, parent=None):
+        super().__init__(parent)
+        self._settings = settings
+        self.cancel_event = threading.Event()
+
+    def cancel(self):
+        self.cancel_event.set()
+
+    def run(self):
+        from zoom2txt.blackboard.client import BlackboardClient
+        from zoom2txt.security import redact
+
+        client = None
+        try:
+            client = BlackboardClient(self._settings.blackboard_url, self.log.emit)
+            if not client.is_logged_in():
+                self.needs_login.emit()
+                return
+            courses = client.get_current_courses()
+            if self.cancel_event.is_set():
+                return
+            WorkLedger(self._settings).remember_courses(courses)
+            self.found.emit(courses)
+        except Exception as exc:
+            self.failed.emit(redact(exc))
+        finally:
+            if client is not None:
+                client.session.close()
+
+
 class ScanWorker(QThread):
     log = Signal(str)
     needs_login = Signal()
     found = Signal(object)
     capped = Signal(int, int)
     failed = Signal(str)
+    courses_loaded = Signal(object)
 
-    def __init__(self, settings, ranges=None, parent=None):
+    def __init__(self, settings, ranges=None, parent=None, *, course_id=None):
         super().__init__(parent)
         self._settings = settings
         self._ranges = ranges or []
+        self._course_id = course_id
         self.all_pending = []
         self.partial_errors = []
         self.cancel_event = threading.Event()
@@ -93,8 +133,16 @@ class ScanWorker(QThread):
             courses = client.get_current_courses()
             ledger = WorkLedger(self._settings)
             ledger.remember_courses(courses)
+            self.courses_loaded.emit(courses)
+            if self._course_id is not None:
+                courses = [course for course in courses if course["id"] == self._course_id]
+                if not courses:
+                    raise RuntimeError(
+                        "El curso elegido ya no está disponible en el ciclo detectado. "
+                        "Actualiza los cursos y elige uno de la lista."
+                    )
             self.log.emit(
-                f"[+] {len(courses)} cursos del ciclo detectado. Revisa las fechas elegidas."
+                f"[+] Revisando {len(courses)} curso(s) del ciclo detectado. Revisa las fechas elegidas."
             )
             items = []
             for course in courses:
