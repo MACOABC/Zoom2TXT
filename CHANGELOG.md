@@ -1,5 +1,42 @@
 # Changelog
 
+## 3.0.0 — Evolución
+
+El flujo no cambia: Blackboard → Zoom → YouTube → subtítulos → TXT verificado → limpieza. Todo lo que lo rodea se rehízo.
+
+### Interfaz
+
+- Sistema de diseño nuevo («grafito y esmeralda») en modo claro y oscuro, con contraste AA verificado, iconografía Lucide en toda la app y componentes propios.
+- Barra lateral por áreas (Flujo · Estudio · Control) con contador de pendientes y cupo diario siempre visible.
+- **Inicio**: qué falta, qué sigue, avance S1–S16 del ciclo, cupo del día y próximas clases por transcribir.
+- **Progreso real por paso**: porcentaje, velocidad y tiempo restante de la descarga de Zoom y de la subida a YouTube, y cuenta atrás hasta la siguiente consulta de subtítulos.
+- **Paleta de comandos (Ctrl+K)**: ir a cualquier sección, lanzar acciones y buscar texto dentro de todas las clases y materiales. Atajos Ctrl+1…8, F5 y Ctrl+,.
+- Avisos no bloqueantes al terminar cada clase o tanda; estados de cada fila como pastillas de color.
+- **Biblioteca** con búsqueda por nombre, curso o contenido, orden por columnas y **lector integrado** con búsqueda resaltada.
+- Sin desbordes horizontales en el tamaño mínimo de ventana (880 × 560).
+
+### Asistente de estudio
+
+- **Modelos al día y enrutado automático**: la app descubre qué modelos admite tu clave, usa uno ligero para conversar y uno más capaz para guías y simulacros, y salta los que agotaron su cuota hasta que se renueve. Las preferencias con modelos retirados vuelven a Automático.
+- **Contexto completo cuando cabe**: con pocas fuentes marcadas el modelo lee el texto íntegro en vez de fragmentos; si excede el límite gratuito por minuto, reintenta solo con los pasajes clave.
+- **Memoria de conversación** y varias conversaciones por curso.
+- **Citas numeradas y verificables**: cada `[n]` abre el pasaje original (clase, página, diapositiva o minuto aproximado) y la fuente en el lector.
+- **Respuesta en streaming** con botón Detener.
+- **Tarjetas de repaso** y **simulacros** de opción múltiple con nota, explicación y exportación (CSV para Anki, Markdown); quedan guardados para repetirlos sin gastar cuota.
+- Resumen, guía de estudio, conceptos clave y fechas/entregas en un clic.
+- Modo «Solo mis fuentes» (estricto) o «Fuentes + conocimiento general» señalado aparte.
+- Recuperación híbrida BM25 + embeddings con fusión de puntuaciones normalizadas y tipos de tarea de consulta/documento.
+
+### Motor y fiabilidad
+
+- Esquema SQLite v3 con migración atómica y copia de seguridad automática previa.
+- Registro de actividad en disco con datos sensibles ocultos y rotación.
+- Inventario, pendientes y portada calculados en una sola lectura; huellas SHA-256 memorizadas por identidad de archivo. La suite pasó de ~97 s a ~47 s con 42 pruebas más.
+- Corregido: la sincronización de carpetas reasignaba el curso de una fuente por su nombre de archivo.
+- Corregido: carrera al abrir por primera vez la base desde varios hilos.
+- Opción para buscar clases nuevas al abrir la aplicación.
+- 236 pruebas automatizadas con HTTP real bloqueado.
+
 ## 2.8.0 — Búsqueda de grabaciones por curso y Asistente IA en la Nube
 
 - **Asistente IA de Estudio en la Nube (Estilo NotebookLM):** pestaña integrada con motor RAG sobre SQLite FTS5 (BM25) + Gemini Free Tier (`gemini-2.5-flash`, `gemini-2.5-flash-lite`, `gemini-embedding-001`) bajo esquema BYOK (Costo $0, sin tarjeta y 0% de ejecución de IA local en la PC).

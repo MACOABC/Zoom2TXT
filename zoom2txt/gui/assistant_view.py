@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import html
 import re
+import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -743,6 +744,7 @@ class _MessageWidget(QFrame):
             chip.setToolTip(f"{title}\n{citation.get('course_name', '')}\n{where}".strip())
             chip.clicked.connect(lambda _=False, n=int(citation["n"]): self.cite_clicked.emit(n))
             self.sources_flow.addWidget(chip)
+            chip.show()
         self.sources_host.setVisible(bool(numbered))
 
     def citation(self, number: int) -> dict | None:
@@ -853,6 +855,7 @@ class ChatTranscript(QScrollArea):
             f"<p>{html.escape(tone_note[1])}</p>" if tone_note else ""
         )
         self._layout.insertWidget(0, box)
+        box.show()
 
     def _drop_welcome(self) -> None:
         if self._welcome is not None:
@@ -868,6 +871,7 @@ class ChatTranscript(QScrollArea):
         widget.cite_clicked.connect(lambda n, w=widget: self.cite_clicked.emit(w, n))
         widget.copy_requested.connect(lambda text: QApplication.clipboard().setText(text))
         self._layout.insertWidget(self._layout.count() - 1, widget)
+        widget.show()
         self._messages.append(widget)
         return widget
 
@@ -948,7 +952,7 @@ class AssistantView(QWidget):
         self.sources_toggle_btn.toggled.connect(self._toggle_sources_panel)
         self.course_combo = QComboBox()
         self.course_combo.setAccessibleName("Curso para consultar en el Asistente IA")
-        self.course_combo.setMinimumWidth(170)
+        self.course_combo.setMinimumWidth(120)
         self.course_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.course_combo.currentIndexChanged.connect(self._on_scope_changed)
         self.all_courses_btn = QPushButton("Todos los cursos")
@@ -1191,7 +1195,7 @@ class AssistantView(QWidget):
             "Activado: responde únicamente con lo que dicen tus fuentes.\n"
             "Desactivado: además puede complementar con conocimiento general, en un apartado aparte."
         )
-        widgets.set_icon(self.grounding_btn, "shield-check", "MUTED", 14)
+        self._sync_grounding_label()
         self.grounding_btn.toggled.connect(self._on_grounding_toggled)
         self.sources_indicator_lbl = widgets.ElidedLabel("")
         self.sources_indicator_lbl.setObjectName("faint")
@@ -1233,6 +1237,14 @@ class AssistantView(QWidget):
         elif not narrow and getattr(self, "_auto_hidden", False):
             self._auto_hidden = False
             self.sources_toggle_btn.setChecked(True)
+        if narrow != getattr(self, "_compact", None):
+            # En ventanas angostas las etiquetas largas se acortan para no desbordar.
+            self._compact = narrow
+            self.all_courses_btn.setText("Todos" if narrow else "Todos los cursos")
+            self.materials_menu_btn.setText("" if narrow else "Añadir")
+            self.model_combo.setMinimumWidth(118 if narrow else 150)
+            self._update_api_status_btn()
+            self._sync_grounding_label()
 
     def _toggle_sources_panel(self, visible: bool) -> None:
         self.sources_card.setVisible(visible)
@@ -1349,6 +1361,7 @@ class AssistantView(QWidget):
 
     def _on_all_courses_toggled(self, checked: bool) -> None:
         self.course_combo.setEnabled(not checked)
+        widgets.set_icon(self.all_courses_btn, "globe", "ON_ACCENT" if checked else "MUTED", 14)
         self._reload_sources_tree()
         self._reload_chat_history()
 
@@ -1665,6 +1678,13 @@ class AssistantView(QWidget):
     def _on_ingest_progress(self, current: int, total: int, filename: str) -> None:
         self.progress_bar.setRange(0, max(1, total))
         self.progress_bar.setValue(current)
+        # La primera indexación de un ciclo entero puede tardar minutos: se
+        # informa el avance en cuanto deja de ser instantánea.
+        started = getattr(self, "_ingest_started", None)
+        if started is None or current <= 1:
+            self._ingest_started = started = time.monotonic()
+        if time.monotonic() - started > 2.5 and total:
+            self._set_status(f"Preparando tus fuentes para el asistente… {current} de {total}")
 
     def _on_sync_done(self, stats: dict, silent_if_empty: bool = False) -> None:
         self.progress_bar.hide()
@@ -1674,6 +1694,9 @@ class AssistantView(QWidget):
         self._reload_courses()
         self._reload_sources_tree()
         added = len(self._sources_cache) - before
+        self._ingest_started = None
+        if self.scope_status.text().startswith("Preparando tus fuentes"):
+            self._set_status("")
         if not silent_if_empty:
             t_idx = stats.get("transcripts_indexed", 0)
             m_idx = stats.get("materials_indexed", 0)
@@ -1712,9 +1735,21 @@ class AssistantView(QWidget):
             self.settings.gemini_model = model
             self.settings.save()
 
+    def _sync_grounding_label(self) -> None:
+        strict = self.grounding_btn.isChecked()
+        compact = bool(getattr(self, "_compact", False))
+        self.grounding_btn.setText(
+            ("Solo fuentes" if compact else "Solo mis fuentes")
+            if strict
+            else ("+ general" if compact else "Fuentes + general")
+        )
+        widgets.set_icon(
+            self.grounding_btn, "shield-check", "ON_ACCENT" if strict else "MUTED", 14
+        )
+
     def _on_grounding_toggled(self, strict: bool) -> None:
         self.settings.ai_grounding = "strict" if strict else "tutor"
-        self.grounding_btn.setText("Solo mis fuentes" if strict else "Fuentes + general")
+        self._sync_grounding_label()
         try:
             self.settings.save()
         except OSError:
@@ -1741,15 +1776,16 @@ class AssistantView(QWidget):
 
     def _update_api_status_btn(self) -> None:
         has_key = self._has_key()
+        compact = bool(getattr(self, "_compact", False))
         if has_key:
-            self.api_status_btn.setText("IA conectada")
+            self.api_status_btn.setText("IA" if compact else "IA conectada")
             self.api_status_btn.setToolTip(
                 "Tu clave de Gemini está lista. Clic para cambiarla o ver el uso de hoy."
             )
             self.api_status_btn.setProperty("variant", "secondary")
             widgets.set_icon(self.api_status_btn, "circle-check", "SUCCESS", 16)
         else:
-            self.api_status_btn.setText("Conectar IA")
+            self.api_status_btn.setText("Conectar" if compact else "Conectar IA")
             self.api_status_btn.setProperty("variant", "primary")
             self.api_status_btn.setToolTip(
                 "Configura tu clave gratuita de Google AI Studio (sin tarjeta)."

@@ -23,8 +23,11 @@ Zoom2TXT convierte un flujo académico repetitivo en una aplicación de escritor
 - Trabajos recuperables: una interrupción no obliga a descargar ni subir nuevamente lo ya confirmado.
 - Detección de duplicados, selección del MP4 sobre audio separado y organización por curso/semana.
 - Estados explícitos para descarga, subida, procesamiento de subtítulos y verificación del TXT.
-- **Asistente IA de Estudio en la Nube (Estilo NotebookLM):** motor RAG local basado en SQLite FTS5 (BM25) + Gemini Free Tier en la nube (BYOK con `google-genai`, **Costo $0**, sin tarjeta de crédito y **0% de ejecución de IA local en la PC del usuario**). Responde únicamente a partir de las transcripciones y materiales del curso (`.pdf`, `.pptx`, `.docx`, `.txt`, `.md`) con citas verificables `[Curso | Fuente]`.
-- Una suite de **pruebas automatizadas** con HTTP real bloqueado durante los tests.
+- Progreso real por paso (porcentaje, velocidad y tiempo restante de descarga y subida) sin cambiar el pipeline.
+- **Asistente de estudio**: índice local SQLite FTS5 + Gemini con la clave gratuita del propio estudiante (BYOK, `google-genai`). Responde a partir de las transcripciones y materiales del curso (`.pdf`, `.pptx`, `.docx`, `.txt`, `.md`) con **citas numeradas que abren el pasaje original**, memoria de conversación, contexto completo cuando cabe, respuesta en streaming, **tarjetas de repaso** y **simulacros con nota**.
+- Enrutado de modelos que se adapta solo a los cambios de catálogo y a las cuotas de la capa gratuita.
+- Paleta de comandos (Ctrl+K), búsqueda de texto completo en todas las clases y lector integrado.
+- **236 pruebas automatizadas** con HTTP real bloqueado durante los tests.
 
 ## Demo segura, sin credenciales
 
@@ -34,13 +37,15 @@ El modo demo utiliza cursos, grabaciones y transcripciones ficticias. No abre se
 python main.py --demo
 ```
 
-La demostración permite revisar el inventario, simular el pipeline y abrir la biblioteca resultante. Todos sus archivos viven en un directorio temporal que se elimina al cerrar.
+La demostración permite revisar el inventario, simular el pipeline con su progreso, abrir la biblioteca y probar el asistente (respuestas, tarjetas y simulacro sintéticos). Todos sus archivos viven en un directorio temporal que se elimina al cerrar.
 
 ![Clases ficticias detectadas en Zoom2TXT](docs/images/demo-classes.png)
 
 ![Pipeline ficticio con estados por clase](docs/images/demo-processing.png)
 
 ![Biblioteca de transcripciones sintéticas](docs/images/demo-library.png)
+
+![Asistente de estudio con citas numeradas](docs/images/demo-assistant.png)
 
 ## Flujo
 
@@ -76,7 +81,7 @@ La arquitectura y sus límites de confianza están descritos en [docs/ARCHITECTU
 | Autorización | OAuth 2.0 por usuario |
 | Secretos | Credential Manager / Secret Service / KWallet mediante `keyring` |
 | Persistencia | SQLite (con índice léxico FTS5 BM25), escrituras atómicas y `platformdirs` |
-| Asistente IA (RAG) | Google AI Studio Free Tier (`google-genai`, `gemini-2.5-flash` / `gemini-2.5-flash-lite` + `gemini-embedding-001`), 100% Cloud BYOK ($0 costo, 0% IA local) |
+| Asistente de estudio | Google AI Studio con clave propia (`google-genai`); modelos Gemini descubiertos en tiempo de ejecución y `gemini-embedding-001`; índice y búsqueda locales |
 | Calidad | `unittest`, Ruff, pip-audit, Gitleaks y GitHub Actions |
 | Distribución | PyInstaller |
 
@@ -126,11 +131,24 @@ python -m PyInstaller --noconfirm --clean zoom2txt.spec
 
 El usuario final conserva `Zoom2TXT.exe` y `yt-dlp.exe` en la misma carpeta. Las releases binarias se publican por separado para evitar incluir ejecutables pesados en el historial Git.
 
+## Atajos
+
+| Atajo | Acción |
+|---|---|
+| Ctrl+K | Paleta de comandos y búsqueda en todas las clases |
+| Ctrl+1 … Ctrl+8 | Inicio, Clases, Manual, Material, Biblioteca, Asistente, Pendientes, Estado |
+| F5 | Buscar clases nuevas (o material, en esa sección) |
+| Ctrl+, | Ajustes |
+| Enter / Mayús+Enter | Enviar pregunta / salto de línea |
+| Ctrl+F, F3 | Buscar en el lector |
+| Espacio, ← →, 1, 2 | Voltear y calificar tarjetas |
+
 ## Privacidad y límites
 
 - Cada persona usa sus propias credenciales; el proyecto no distribuye cuentas compartidas.
 - El soporte automático depende de la estructura Learn Ultra + Zoom LTI expuesta por cada institución y puede requerir adaptación.
 - La generación y disponibilidad de subtítulos dependen de YouTube.
+- El asistente envía a Google los pasajes necesarios para responder, con la clave del propio usuario. En la capa gratuita de AI Studio, Google puede usar ese contenido para mejorar sus productos; las cuotas diarias son reducidas y cambian con el tiempo.
 - La app limita intencionalmente las clases nuevas iniciadas por día; las recuperaciones ya subidas pueden continuar.
 - No se incluyen grabaciones, transcripciones, nombres de cursos, correos, IDs ni capturas de una cuenta real.
 - El modo móvil y el control por Telegram no forman parte de esta versión pública.
@@ -144,8 +162,12 @@ zoom2txt/
 ├── cleaning/        # consolidación fiel de subtítulos
 ├── core/            # pipeline recuperable
 ├── download/        # integración con yt-dlp
-├── gui/             # interfaz PySide6
-└── transcription/   # OAuth, YouTube y subtítulos
+├── gui/             # interfaz PySide6 (sistema de diseño, vistas y diálogos)
+├── transcription/   # OAuth, YouTube y subtítulos
+├── ai_models.py     # catálogo, descubrimiento y enrutado de modelos
+├── ai_gateway.py    # puerta única hacia Gemini (streaming, JSON, embeddings)
+├── rag_engine.py    # ingesta, recuperación híbrida, contexto y citas
+└── study.py         # tarjetas, simulacros y herramientas de estudio
 tests/               # fixtures sintéticos; HTTP real prohibido
 scripts/             # auditoría de privacidad, runtime y capturas demo
 docs/                # arquitectura, métricas y seguridad
@@ -153,7 +175,7 @@ docs/                # arquitectura, métricas y seguridad
 
 ## Estado del proyecto
 
-Zoom2TXT es una aplicación utilizada en un flujo académico real y presentada aquí como una versión de portafolio anonimizada. La siguiente deuda está declarada, no escondida: dividir `main_window.py`, completar el empaquetado Linux reproducible y ampliar pruebas end-to-end contra un entorno sandbox de Blackboard.
+Zoom2TXT es una aplicación utilizada en un flujo académico real y presentada aquí como una versión de portafolio anonimizada. La siguiente deuda está declarada, no escondida: seguir dividiendo `main_window.py`, completar el empaquetado Linux reproducible y ampliar pruebas end-to-end contra un entorno sandbox de Blackboard.
 
 Consulta [CONTRIBUTING.md](CONTRIBUTING.md) antes de proponer cambios y [SECURITY.md](SECURITY.md) para reportar una vulnerabilidad sin publicar datos sensibles.
 

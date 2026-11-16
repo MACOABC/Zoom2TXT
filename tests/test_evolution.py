@@ -157,10 +157,10 @@ class StorageAndPerformanceTests(Case):
 
     def test_activity_log_is_redacted_and_rotates(self):
         with patch.object(config, "DEBUG_DIR", self.root / "debug"):
-            logs.write("[i] acceso con password=secreto123 de alguien@correo.com")
+            logs.write("[i] acceso con password=secreto123 de alguien@example.com")
             content = logs.log_path().read_text(encoding="utf-8")
             self.assertNotIn("secreto123", content)
-            self.assertNotIn("alguien@correo.com", content)
+            self.assertNotIn("alguien@example.com", content)
             self.assertIn("[OCULTO]", content)
             with patch.object(logs, "MAX_BYTES", 200):
                 for index in range(30):

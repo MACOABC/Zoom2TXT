@@ -495,7 +495,11 @@ def extract_sections_from_file(path: Path, source_type: str | None = None) -> li
         return sections
 
     if stype == "pdf" or ext == ".pdf":
+        import logging
+
         from pypdf import PdfReader
+
+        logging.getLogger("pypdf").setLevel(logging.ERROR)
 
         reader = PdfReader(str(path))
         sections = []

@@ -175,6 +175,10 @@ class ReaderDialog(QDialog):
             self.search.setText(self._best_term(query))
             self._run_search()
 
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self.view.setFocus(Qt.FocusReason.OtherFocusReason)
+
     # ── Presentación ──────────────────────────────────────────────
     def _render(self) -> None:
         if not self._text:

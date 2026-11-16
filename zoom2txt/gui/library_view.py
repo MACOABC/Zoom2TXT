@@ -333,6 +333,7 @@ class LibraryView(QWidget):
             row = _HitRow(hit)
             item.setSizeHint(QSize(0, max(56, row.sizeHint().height())))
             self.hits_list.setItemWidget(item, row)
+            row.show()
         self.hits_title.setVisible(bool(self._hits))
         self.hits_list.setVisible(bool(self._hits))
 

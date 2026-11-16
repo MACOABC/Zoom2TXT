@@ -191,7 +191,13 @@ class FlashcardsDialog(QDialog):
             QShortcut(QKeySequence(key), self, activated=slot)
         self._apply_card_style()
         style.on_theme_change(self._apply_card_style)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self._show()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        # Sin anillo de foco sobre un botón al abrir: el teclado ya tiene atajos propios.
+        self.setFocus(Qt.FocusReason.OtherFocusReason)
 
     def _apply_card_style(self) -> None:
         self.card.setStyleSheet(
@@ -404,7 +410,13 @@ class QuizDialog(QDialog):
             )
         QShortcut(QKeySequence("Return"), self, activated=self._next_key)
         style.on_theme_change(self._restyle_options)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self._show_question()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        # Sin anillo de foco sobre un botón al abrir: el teclado ya tiene atajos propios.
+        self.setFocus(Qt.FocusReason.OtherFocusReason)
 
     # ── Pregunta ──────────────────────────────────────────────────
     def _option_style(self, state: str) -> str:
@@ -462,6 +474,7 @@ class QuizDialog(QDialog):
             button.clicked.connect(lambda _=False, p=position: self.choose(p))
             self.option_group.addButton(button, position)
             self.options_host.addWidget(button)
+            button.show()
             self.option_buttons.append(button)
         self.feedback.hide()
         self.next_btn.setEnabled(False)
@@ -561,6 +574,7 @@ class QuizDialog(QDialog):
             answer.setTextFormat(Qt.TextFormat.PlainText)
             card_lay.addWidget(answer)
             self.review_lay.addWidget(card)
+            card.show()
         self.review_lay.addStretch()
         self.pages.setCurrentIndex(1)
         self.counter.setText("Resultado")

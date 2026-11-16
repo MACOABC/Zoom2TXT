@@ -15,20 +15,34 @@ flowchart TB
     Pipeline --> Captions[Extractor de subtítulos]
     Pipeline --> Store[(SQLite + FTS5 + estado cifrado)]
     Captions --> Files[TXT verificado]
-    Files --> RAG[Motor RAG Híbrido + Gemini Cloud Free Tier]
+    Files --> RAG[Índice local + contexto y citas]
     Store --> RAG
+    RAG --> Gateway[Puerta Gemini · enrutado de modelos]
     Store --> Keyring[Keyring del sistema]
 ```
 
-### Asistente IA en la Nube (Motor RAG `zoom2txt/rag_engine.py`)
+### Asistente de estudio
 
-- **0% IA Local y $0 Costo (BYOK):** No ejecuta modelos pesados en la PC del usuario (sin Ollama, PyTorch ni ONNX). La inferencia LLM (`gemini-2.5-flash`, `gemini-2.5-flash-lite`) y los embeddings opcionales (`gemini-embedding-001`) corren en la nube de Google AI Studio bajo la capa gratuita del propio estudiante.
-- **Recuperación Híbrida sobre SQLite FTS5:** En la PC solo se indexa texto limpio en tablas `knowledge_sources`, `knowledge_chunks` y `knowledge_chunks_fts` (ranking BM25 en `<5 ms`).
-- **Grounding Estricto y Citas:** El prompt del sistema prohíbe usar conocimiento externo y exige citas verificables `[Curso: <Nombre> | Fuente: <Título>]`. Soporta aislamiento por curso, modo global multi-curso y filtros rápidos por semanas (Parcial / Final).
+Tres módulos con responsabilidades separadas:
+
+- **`ai_models.py` — catálogo y enrutado.** Google retira modelos varias veces al año y las cuotas gratuitas son de pocas decenas de solicitudes diarias en los modelos más capaces. La app parte de un catálogo conocido, lo completa con `models.list()` de la clave del usuario y, en modo Automático, ordena por tarea (ligero para conversar, capaz para guías y simulacros). Un 429 diario marca el modelo como agotado hasta la medianoche del Pacífico; un 404 lo retira un día. Lleva un contador local de uso, que no es el saldo real.
+- **`ai_gateway.py` — puerta única.** Generación normal, en streaming y JSON; embeddings; clasificación de errores en categorías accionables y mensajes en lenguaje claro. Si un modelo falla a mitad de una respuesta, la interfaz descarta lo parcial y continúa con el siguiente.
+- **`rag_engine.py` — conocimiento.** Ingesta por hash en `knowledge_sources`/`knowledge_chunks` con índice FTS5; recuperación BM25 con re-ranking semántico opcional (combinación convexa de puntuaciones normalizadas, embeddings en caché). `build_context` decide qué recibe el modelo:
+
+| Situación | Contexto |
+|---|---|
+| Las fuentes marcadas caben en el presupuesto | Texto íntegro de cada fuente (`full`) |
+| No caben y es una pregunta | Fragmentos más relevantes, fusionando los contiguos (`retrieval`) |
+| No caben y es una guía o simulacro | Muestra pareja de todas las fuentes (`sample`) |
+| Sin fuentes | Conocimiento general, avisado en la respuesta (`general`) |
+
+Cada pasaje lleva un número; el modelo cita con `[n]` y solo los números que existen se convierten en enlaces al texto original. Las tarjetas y simulacros se piden como JSON, se validan y se guardan para repetirlos sin gastar cuota.
 
 ### GUI
 
-`zoom2txt/gui/` contiene navegación, wizard inicial, estados, biblioteca y recuperación. Las operaciones largas salen del hilo de interfaz mediante `QThread`.
+`zoom2txt/gui/` contiene el sistema de diseño (`style.py`, `widgets.py`), la ventana principal, Inicio, Biblioteca con lector, Asistente, diálogos de estudio, paleta de comandos, wizard inicial y recuperación. Las operaciones largas salen del hilo de interfaz mediante `QThread`.
+
+El avance real de descarga y subida viaja junto al callback de log (`progress.py`): las funciones del pipeline conservan su firma y la interfaz recibe porcentaje, velocidad y tiempo restante.
 
 ### Blackboard y Zoom
 
@@ -49,7 +63,7 @@ flowchart TB
 ### Persistencia
 
 - `platformdirs` elige la carpeta de datos del usuario.
-- SQLite guarda inventario, historial, estados y planificación.
+- SQLite guarda inventario, historial, estados, planificación, el índice del asistente y las conversaciones. Las migraciones de esquema son atómicas y dejan una copia previa.
 - Los JSON con URLs o cookies se cifran ligados al usuario del sistema.
 - La contraseña de Zoom reside en el keyring; no se serializa en configuración.
 - Las escrituras importantes usan reemplazo atómico.

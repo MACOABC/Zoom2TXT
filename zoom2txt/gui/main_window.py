@@ -334,6 +334,7 @@ class MainWindow(QMainWindow):
             "Clases nuevas iniciadas hoy. El máximo de 6 es una regla de la app para cuidar tu "
             "cuenta; no es la cuota de Google."
         )
+        self.quota_card = quota
         side.addWidget(quota)
         side.addSpacing(8)
 
@@ -465,14 +466,6 @@ class MainWindow(QMainWindow):
         self.dock_material_status = QLabel("")
         self.dock_material_status.setObjectName("faint")
         status_row.addWidget(self.dock_material_status)
-        self.recovery_cancel_btn = widgets.button("Pausar recuperación", "pause", "secondary")
-        self.recovery_cancel_btn.clicked.connect(self._cancel_recovery)
-        self.recovery_cancel_btn.hide()
-        status_row.addWidget(self.recovery_cancel_btn)
-        self.open_btn = widgets.button("Abrir transcripciones", "folder-open", "secondary")
-        self.open_btn.hide()
-        self.open_btn.clicked.connect(self._open_result)
-        status_row.addWidget(self.open_btn)
         self.toggle_console_btn = widgets.button(
             "Registro", "terminal", "ghost", "Muestra u oculta el registro técnico detallado."
         )
@@ -481,11 +474,23 @@ class MainWindow(QMainWindow):
         status_row.addWidget(self.toggle_console_btn)
         body.addLayout(status_row)
 
+        # Segunda fila: clase en curso y acciones que solo aparecen cuando aplican.
+        actions_row = QHBoxLayout()
+        actions_row.setSpacing(8)
         self.queue_label = QLabel("")
         self.queue_label.setObjectName("accent")
         self.queue_label.setWordWrap(True)
         self.queue_label.hide()
-        body.addWidget(self.queue_label)
+        actions_row.addWidget(self.queue_label, 1)
+        self.recovery_cancel_btn = widgets.button("Pausar recuperación", "pause", "secondary")
+        self.recovery_cancel_btn.clicked.connect(self._cancel_recovery)
+        self.recovery_cancel_btn.hide()
+        actions_row.addWidget(self.recovery_cancel_btn)
+        self.open_btn = widgets.button("Abrir transcripciones", "folder-open", "secondary")
+        self.open_btn.hide()
+        self.open_btn.clicked.connect(self._open_result)
+        actions_row.addWidget(self.open_btn)
+        body.addLayout(actions_row)
 
         self.stepper = widgets.PipelineStepper(list(STAGES))
         self.stage_rows = self.stepper.rows
@@ -517,6 +522,18 @@ class MainWindow(QMainWindow):
             self._content_layout.setContentsMargins(inset, 14 if compact else 20, inset, 16)
             self._topbar_layout.setContentsMargins(inset, 12 if compact else 16, inset - 4, 12)
             self.palette_btn.setMinimumWidth(120 if compact else 190)
+            # En ventanas bajas la tarjeta de cupo cede su sitio a la navegación.
+            self.quota_card.setVisible(self.height() >= 690)
+            if hasattr(self, "courses_btn") and compact != getattr(self, "_compact", None):
+                self._compact = compact
+                self.courses_btn.setText("" if compact else "Actualizar cursos")
+                self.course_combo.setMinimumWidth(130 if compact else 200)
+                self.course_combo.setMinimumContentsLength(12 if compact else 24)
+                self.term_btn.setText(
+                    "Inicio de clases…" if compact else "Configurar inicio de clases…"
+                )
+                self.table.setColumnWidth(5, 168 if compact else 196)
+                self.table.setColumnWidth(4, 96 if compact else 110)
             if hasattr(self, "table"):
                 row_height = 34 if compact else style.ROW_HEIGHT
                 self.table.verticalHeader().setMinimumSectionSize(row_height)
@@ -565,8 +582,9 @@ class MainWindow(QMainWindow):
         course_label.setBuddy(self.course_combo)
         self.courses_btn = widgets.button(
             "Actualizar cursos", "refresh-cw", "secondary",
-            "Carga tus cursos desde Blackboard sin abrir Zoom ni preparar grabaciones.",
+            "Actualizar cursos: carga la lista desde Blackboard sin abrir Zoom ni preparar grabaciones.",
         )  # fmt: skip
+        self.courses_btn.setAccessibleName("Actualizar cursos")
         self.courses_btn.clicked.connect(self._refresh_courses)
         course_row.addWidget(course_label)
         course_row.addWidget(self.course_combo, 1)
@@ -605,11 +623,11 @@ class MainWindow(QMainWindow):
         self.weeks_hint = QLabel("")
         self.weeks_hint.setObjectName("faint")
         self.weeks_hint.setWordWrap(True)
-        cfg_btn = widgets.button("Configurar inicio de clases…", "calendar-days", "ghost")
-        cfg_btn.clicked.connect(self._configure_term_start)
+        self.term_btn = widgets.button("Configurar inicio de clases…", "calendar-days", "ghost")
+        self.term_btn.clicked.connect(self._configure_term_start)
         wtop.addWidget(self.weeks_chk)
         wtop.addWidget(self.weeks_hint, 1)
-        wtop.addWidget(cfg_btn)
+        wtop.addWidget(self.term_btn)
         wlay.addLayout(wtop)
 
         self.weeks_grid_host = QWidget()
@@ -730,7 +748,7 @@ class MainWindow(QMainWindow):
         self.cancel_queue_btn = widgets.button("Cancelar", "square", "danger", token="ERROR")
         self.cancel_queue_btn.clicked.connect(self._cancel_queue)
         self.cancel_queue_btn.hide()
-        bottom.addWidget(self.delete_chk)
+        lay.addWidget(self.delete_chk)
         bottom.addStretch()
         bottom.addWidget(self.skip_all_btn)
         bottom.addWidget(self.process_btn)
@@ -925,10 +943,11 @@ class MainWindow(QMainWindow):
         from zoom2txt.workflow import DAILY_LIMIT, WorkLedger
 
         try:
-            ledger = WorkLedger(self.settings)
-            daily = ledger.daily()
-            pending = len(ledger.pending())
-            if not ledger.courses():
+            # Una sola lectura del inventario alimenta el aviso, el cupo y la portada.
+            overview = WorkLedger(self.settings).overview()
+            daily = overview["daily"]
+            pending = len(overview["pending"])
+            if not overview["courses"]:
                 text = f"Hoy: {daily['used']}/{DAILY_LIMIT} clases iniciadas. Busca para guardar el inventario."
             else:
                 text = f"{pending} pendientes guardadas · hoy {daily['used']}/{DAILY_LIMIT} iniciadas. "
@@ -937,17 +956,16 @@ class MainWindow(QMainWindow):
                     if daily["remaining"] == 0
                     else f"Puedes iniciar {daily['remaining']} nuevas hoy."
                 )
-                missing = sum(r["missing"] or 0 for r in ledger.weekly())
-                if missing:
-                    text += f" {missing} sesiones esperadas sin aparecer: revisa Pendientes."
-                if any(c.get("error") for c in ledger.courses()):
+                if overview["missing"]:
+                    text += f" {overview['missing']} sesiones esperadas sin aparecer: revisa Pendientes."
+                if overview["partial"]:
                     text += " Inventario parcial: vuelve a buscar."
             self.backlog_notice.setText(text)
             self._update_quota(daily, pending)
             if self.stack.currentWidget() is self.backlog:
                 self.backlog.refresh()
             elif self.stack.currentWidget() is getattr(self, "home", None):
-                self.home.refresh()
+                self.home.refresh(overview)
         except Exception:  # noqa: BLE001 — resilient UI read boundary
             self.backlog_notice.setText(
                 "No se pudo leer el inventario local. Vuelve a buscar; no se han borrado tus clases."

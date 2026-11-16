@@ -141,8 +141,8 @@ class WorkLedger:
             key=lambda c: c.get("name", ""),
         )
 
-    def inventory(self):
-        ids = {c["id"] for c in self.courses()}
+    def inventory(self, courses=None):
+        ids = {c["id"] for c in (self.courses() if courses is None else courses)}
         rows = [
             r
             for r in self.store.list("catalog")
@@ -164,7 +164,7 @@ class WorkLedger:
         return sorted(rows, key=lambda r: (r["start_time"], r["id"]))
 
     def pending(self):
-        done = Registry(self.settings).processed_keys()
+        done = Registry(self.settings, self.store).processed_keys()
         return [
             r
             for r in self.inventory()
@@ -175,8 +175,9 @@ class WorkLedger:
         """Resumen para el panel de inicio: una sola pasada por el inventario."""
         now = now or local_now()
         daily = self.daily(now)
-        inventory = self.inventory()
-        done = Registry(self.settings).processed_keys()
+        courses = self.courses()
+        inventory = self.inventory(courses)
+        done = Registry(self.settings, self.store).processed_keys()
         pending = [
             r for r in inventory if recording_key(r["course_id"], r["meeting_id"]) not in done
         ]
@@ -191,7 +192,7 @@ class WorkLedger:
                     slot[0] += 1
                     if recording_key(row["course_id"], row["meeting_id"]) not in done:
                         slot[1] += 1
-        courses = self.courses()
+        weekly = self.weekly(now, inventory=inventory, done=done, courses=courses)
         return {
             "daily": daily,
             "inventory": len(inventory),
@@ -201,6 +202,7 @@ class WorkLedger:
             "by_week": {week: tuple(values) for week, values in by_week.items()},
             "courses": courses,
             "partial": any(c.get("error") for c in courses),
+            "missing": sum(row["missing"] or 0 for row in weekly),
         }
 
     def set_expected(self, course_id, count):
@@ -208,17 +210,20 @@ class WorkLedger:
             raise ValueError("Elige de 0 a 14 sesiones por semana.")
         self.store.put("weekly_plan", course_id, count=count, term_start=self.settings.term_start)
 
-    def weekly(self, now=None):
+    def weekly(self, now=None, inventory=None, done=None, courses=None):
         now = now or local_now()
         today = now.astimezone(LOCAL_ZONE).date()
         monday = weeks.parse_start(self.settings.term_start)
         if not monday:
             return []
-        inventory = self.inventory()
-        done = Registry(self.settings).processed_keys()
+        courses = self.courses() if courses is None else courses
+        inventory = self.inventory(courses) if inventory is None else inventory
+        if done is None:
+            done = Registry(self.settings, self.store).processed_keys()
+        plans = self.store.get_many("weekly_plan")
         result = []
-        for course in self.courses():
-            plan = self.store.get("weekly_plan", course["id"])
+        for course in courses:
+            plan = plans.get(str(course["id"]), {})
             expected = (
                 plan.get("count") if plan.get("term_start") == self.settings.term_start else None
             )

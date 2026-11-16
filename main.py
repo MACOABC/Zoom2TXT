@@ -73,7 +73,7 @@ def main() -> int:
         apply_theme(app, "dark")
         window = DemoMainWindow(settings)
         available = app.primaryScreen().availableGeometry()
-        window.resize(min(1180, available.width() - 40), min(780, available.height() - 40))
+        window.resize(min(1280, available.width() - 40), min(840, available.height() - 40))
         window.show()
         result = app.exec()
         demo_session.cleanup()
@@ -133,9 +133,42 @@ def main() -> int:
                     )
             except (OSError, KeyError, TypeError, ValueError):
                 runtime_ok = False
+        def ai_stack_ready() -> bool:
+            """El asistente necesita el SDK de Gemini y los lectores de documentos
+            dentro del ejecutable; se comprueba sin usar la red."""
+            try:
+                from docx import Document  # noqa: F401
+                from google.genai import types
+                from pptx import Presentation  # noqa: F401
+                from pypdf import PdfReader  # noqa: F401
+
+                from zoom2txt.rag_engine import RAGEngine, ingest_file
+
+                types.GenerateContentConfig(
+                    system_instruction="x",
+                    response_mime_type="application/json",
+                    response_json_schema={"type": "object"},
+                )
+                types.EmbedContentConfig(output_dimensionality=768, task_type="RETRIEVAL_QUERY")
+                sample = DATA_DIR / "txt" / "Prueba_Semana01_Para_NotebookLM.txt"
+                atomic_write(sample, "La fotosíntesis convierte luz en energía química.")
+                ingest_file(settings, sample, course_id="self-test", course_name="Prueba")
+                engine = RAGEngine(settings)
+                plan = engine.build_context("fotosíntesis", course_id="self-test")
+                return bool(engine.search_text("fotosíntesis")) and plan.mode == "full"
+            except Exception:  # noqa: BLE001 — el resultado se informa en el JSON
+                return False
+
+        from zoom2txt.gui import lucide
+        from zoom2txt.gui import style as theme
+
         result = {
             "version": __version__,
             "font": "Inter" in QFontDatabase.families(),
+            "home_created": window.stack.count() == 8 and window.home is not None,
+            "icons": len(lucide.names()) > 100 and not lucide.pixmap("search").isNull(),
+            "theme_assets": Path(theme.CHECK_ICON).is_file() and Path(theme.DOWN_ICON).is_file(),
+            "ai_stack": ai_stack_ready(),
             "encrypted_storage": read_private_json(secret) == {"test": "dummy"},
             "database": state.get("test", "one").get("ok"),
             "timezone": str(ZoneInfo("America/Lima")),
@@ -151,6 +184,10 @@ def main() -> int:
             result[k]
             for k in (
                 "font",
+                "home_created",
+                "icons",
+                "theme_assets",
+                "ai_stack",
                 "encrypted_storage",
                 "database",
                 "gui_created",
@@ -230,7 +267,7 @@ def main() -> int:
 
         window = MainWindow(settings)
         available = app.primaryScreen().availableGeometry()
-        window.resize(min(1180, available.width() - 40), min(780, available.height() - 40))
+        window.resize(min(1280, available.width() - 40), min(840, available.height() - 40))
         window.show()
         return app.exec()
     except Exception:  # noqa: BLE001 — último recurso: diálogo, no traceback

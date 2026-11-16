@@ -185,10 +185,10 @@ class HomeView(QWidget):
             self.lower.setColumnStretch(1, 0)
 
     # ── Datos ─────────────────────────────────────────────────────
-    def refresh(self) -> None:
+    def refresh(self, overview: dict | None = None) -> None:
         try:
             ledger = WorkLedger(self.settings)
-            overview = ledger.overview()
+            overview = overview or ledger.overview()
             stats = ledger.store.knowledge_stats()
             jobs = ledger.store.get_many("job")
         except Exception:  # noqa: BLE001 — la portada nunca debe impedir usar la app
@@ -229,13 +229,15 @@ class HomeView(QWidget):
                     "se retoman sin repetir pasos"
                 )
             if waiting:
-                parts.append(f"{waiting} esperando subtítulos de YouTube")
+                parts.append(
+                    f"{waiting} {'espera' if waiting == 1 else 'esperan'} subtítulos de YouTube"
+                )
             parts.append(
                 f"hoy puedes iniciar {daily['remaining']} más"
                 if daily["remaining"]
                 else f"el cupo de hoy está completo; continúa el {daily['next_day']}"
             )
-            self.summary.setText((". ".join(parts) + ".").capitalize())
+            self.summary.setText(" ".join(part[0].upper() + part[1:] + "." for part in parts))
         else:
             self.headline.setText("Estás al día")
             self.summary.setText(
@@ -291,10 +293,14 @@ class HomeView(QWidget):
                 status = "Pendiente"
             week = weeks.week_of_str(monday, row["start_time"]) if monday else None
             if index:
-                self.next_list.addWidget(widgets.divider())
-            self.next_list.addWidget(
-                _PendingRow(row.get("course_name", "Curso"), row["start_time"][:10], week, status)
+                line = widgets.divider()
+                self.next_list.addWidget(line)
+                line.show()
+            entry = _PendingRow(
+                row.get("course_name", "Curso"), row["start_time"][:10], week, status
             )
+            self.next_list.addWidget(entry)
+            entry.show()
         self.next_host.setVisible(bool(pending))
         self.next_empty.setVisible(not pending)
         self.next_link.setVisible(len(pending) > 6)

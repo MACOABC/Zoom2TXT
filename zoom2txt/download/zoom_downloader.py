@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from collections.abc import Callable
 from pathlib import Path
 
@@ -100,9 +101,15 @@ def descargar_zoom(
     comando += ["--newline", "--progress-template", "download:" + _PROGRESS_TEMPLATE]
     report(log, STAGE_DOWNLOAD, None, "Conectando con Zoom…")
 
+    last_report = [0.0]
+
     def on_line(line: str) -> None:
         parsed = parse_progress(line)
-        if parsed is not None:
+        if parsed is None:
+            return
+        now = time.monotonic()
+        if now - last_report[0] >= 0.2 or (parsed[0] is not None and parsed[0] >= 1.0):
+            last_report[0] = now
             report(log, STAGE_DOWNLOAD, parsed[0], parsed[1])
 
     # Modo automático (Blackboard): la sesión autoriza vía cookies.

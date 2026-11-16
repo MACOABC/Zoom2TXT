@@ -23,9 +23,9 @@ def recording_key(course_id, meeting_id):
 
 
 class Registry:
-    def __init__(self, settings=None):
+    def __init__(self, settings=None, store=None):
         self.settings = settings or Settings.load()
-        self.store = StateStore(self.settings)
+        self.store = store or StateStore(self.settings)
         if not self.store.get("meta", "legacy_imported"):
             self._import_legacy()
 

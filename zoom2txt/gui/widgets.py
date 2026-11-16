@@ -874,8 +874,8 @@ class ToastHost(QWidget):
     def _reposition(self) -> None:
         if not self._toasts:
             return
-        self.adjustSize()
-        height = self._layout.sizeHint().height()
+        # Los textos se ajustan a varias líneas: la altura depende del ancho.
+        height = max(self._layout.totalHeightForWidth(360), self._layout.sizeHint().height())
         self.setGeometry(
             self._window.width() - 360 - 22,
             max(8, self._window.height() - height - 22),

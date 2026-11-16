@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "zoom2txt"
-version = "2.8.0"
+version = "3.0.0"
 description = "Desktop automation from academic Zoom recordings to verified TXT transcripts."
 readme = "README.md"
 requires-python = ">=3.12,<3.15"
@@ -25,9 +25,9 @@ dependencies = [
   "google-api-python-client==2.198.0",
   "google-auth==2.62.0",
   "google-auth-oauthlib==1.4.0",
-  "google-genai==2.33.0",
+  "google-genai==3.3.0",
   "numpy==2.5.4",
-  "pypdf==6.21.3",
+  "pypdf==7.0.0",
   "python-pptx==1.0.2",
   "python-docx==1.2.0",
   "cryptography==50.0.0",

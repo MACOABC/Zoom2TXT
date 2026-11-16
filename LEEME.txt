@@ -1,4 +1,4 @@
-ZOOM2TXT 2.8.0 — INSTALACIÓN EN WINDOWS
+ZOOM2TXT 3.0.0 — INSTALACIÓN EN WINDOWS
 ========================================
 
 1. Extrae el ZIP completo en una carpeta propia.
@@ -35,16 +35,35 @@ El demo es local, usa datos ficticios y no se conecta a servicios externos.
 
 Más documentación: https://github.com/MACOABC/Zoom2TXT
 
-NOVEDADES DE 2.8.0
+NOVEDADES DE 3.0.0
 -----------------
-- Asistente IA en la Nube (Estilo NotebookLM): consulta tus transcripciones y
-  materiales de curso (PDF, PPTX, DOCX, TXT) con citas verificables por curso
-  o entre todos tus cursos, usando tu propia clave gratuita de Google AI Studio
-  (Costo $0, sin tarjeta y 0% consumo de IA local en tu PC).
-- En Clases, pulsa Actualizar cursos, elige un curso y pulsa Buscar clases
-  nuevas. Solo se revisan las grabaciones pendientes del curso elegido.
-- Todos los cursos permite buscar conjuntamente. Puedes combinar el curso
-  con una o varias semanas; sin semanas se revisa el ciclo configurado.
+El flujo es el mismo de siempre (Blackboard, Zoom, YouTube, TXT y limpieza).
+Lo nuevo:
+
+- Interfaz rediseñada, en claro y oscuro, con pantalla de Inicio: qué falta,
+  avance por semana del ciclo y cupo del día.
+- Progreso real: porcentaje, velocidad y tiempo restante de la descarga y de
+  la subida, y cuenta atrás hasta la próxima consulta de subtítulos.
+- Ctrl+K abre un buscador de acciones que también busca texto dentro de todas
+  tus clases. Ctrl+1 a Ctrl+8 cambian de sección; F5 busca clases nuevas.
+- Biblioteca con búsqueda por contenido y lector integrado.
+- Asistente de estudio renovado: recuerda la conversación, cita cada
+  afirmación con un número que abre el pasaje original, escribe la respuesta
+  mientras se genera y lee las clases completas cuando marcas pocas fuentes.
+- Tarjetas de repaso y simulacros con nota; quedan guardados para repetirlos.
+- El modelo de IA se elige solo (Automático) y se adapta a los cambios de
+  Google y a las cuotas gratuitas. Puedes fijar uno si lo prefieres.
+
+Al abrir esta versión por primera vez, la app guarda una copia de tu
+historial (state-backup-…) en su carpeta de datos antes de actualizarlo.
+
+SOBRE EL ASISTENTE
+------------------
+Usa tu propia clave gratuita de Google AI Studio (aistudio.google.com/apikey).
+Al preguntar, los pasajes necesarios se envían a Google para generar la
+respuesta. La capa gratuita tiene cuotas diarias reducidas que Google cambia
+con el tiempo; si se agotan, la app lo indica y puedes seguir con tus
+tarjetas y simulacros guardados.
 
 MEJORAS ANTERIORES
 -----------------
