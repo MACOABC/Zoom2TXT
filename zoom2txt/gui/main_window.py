@@ -2247,7 +2247,20 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         assistant = getattr(self, "assistant", None)
         if assistant is not None and assistant.is_busy():
-            assistant.cancel_all()
+            # Indexar un PDF largo no se corta al instante: la ventana se oculta ya
+            # y el proceso termina en cuanto el hilo suelta el archivo (máx. 20 s).
+            assistant.cancel_all(wait_ms=0)
+            import time
+
+            deadline = getattr(self, "_assistant_deadline", None)
+            if deadline is None:
+                deadline = self._assistant_deadline = time.monotonic() + 20
+            if not self._busy() and time.monotonic() < deadline:
+                self._closing = True
+                self.hide()
+                event.ignore()
+                QTimer.singleShot(200, self.close)
+                return
         health_worker = getattr(getattr(self, "health", None), "_worker", None)
         if health_worker and health_worker.isRunning() and not self._busy():
             self._closing = True

@@ -474,8 +474,17 @@ def chunk_text(
 
 
 # ── Extracción de Materiales (PDF, PPTX, DOCX, TXT/MD) ───────────
-def extract_sections_from_file(path: Path, source_type: str | None = None) -> list[SectionData]:
+def extract_sections_from_file(
+    path: Path, source_type: str | None = None, cancelled=None
+) -> list[SectionData]:
+    """Extrae el texto por secciones. ``cancelled`` permite abandonar un PDF o
+    una presentación larga entre páginas (p. ej. al cerrar la aplicación)."""
     path = Path(path)
+
+    def check_cancel() -> None:
+        if cancelled is not None and cancelled():
+            raise InterruptedError("Indexación cancelada.")
+
     ext = path.suffix.lower()
     stype = source_type or SUPPORTED_EXTENSIONS.get(ext, "txt")
 
@@ -504,6 +513,7 @@ def extract_sections_from_file(path: Path, source_type: str | None = None) -> li
         reader = PdfReader(str(path))
         sections = []
         for idx, page in enumerate(reader.pages, start=1):
+            check_cancel()
             text = (page.extract_text() or "").strip()
             if text:
                 sections.append(SectionData(text=text, metadata={"page": idx}))
@@ -515,6 +525,7 @@ def extract_sections_from_file(path: Path, source_type: str | None = None) -> li
         prs = Presentation(str(path))
         sections = []
         for idx, slide in enumerate(prs.slides, start=1):
+            check_cancel()
             parts: list[str] = []
             slide_title = ""
             if slide.shapes.title and slide.shapes.title.text:
@@ -708,6 +719,7 @@ def ingest_file(
     title: str = "",
     store: StateStore | None = None,
     resolver: CourseResolver | None = None,
+    cancelled=None,
 ) -> int | None:
     """Indexa un archivo de transcripción o material en knowledge_sources y knowledge_chunks.
     Evita re-indexar si el hash SHA-256 no ha cambiado."""
@@ -768,7 +780,7 @@ def ingest_file(
             store.upsert_course(cid, cname)
         return int(source_id)
 
-    sections = extract_sections_from_file(path, stype)
+    sections = extract_sections_from_file(path, stype, cancelled)
     chunks = chunk_sections(sections)
     if not chunks:
         return None
@@ -949,6 +961,7 @@ def sync_existing_transcripts(
                 title=title,
                 store=store,
                 resolver=resolver,
+                cancelled=cancelled,
             )
             if source_id is not None:
                 indexed += 1
@@ -1044,6 +1057,7 @@ def sync_existing_materials(
                 source_type=stype,
                 store=store,
                 resolver=resolver,
+                cancelled=cancelled,
             )
             if sid is not None:
                 indexed += 1

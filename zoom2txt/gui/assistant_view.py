@@ -2405,7 +2405,8 @@ class AssistantView(QWidget):
     def is_busy(self) -> bool:
         return any(w and w.isRunning() for w in self._workers())
 
-    def cancel_all(self) -> None:
+    def cancel_all(self, wait_ms: int = 2000) -> None:
+        """Pide a todos los hilos que terminen. Con ``wait_ms=0`` solo avisa."""
         self._countdown_timer.stop()
         self._stream_timer.stop()
         for w in self._workers():
@@ -2413,7 +2414,8 @@ class AssistantView(QWidget):
                 if hasattr(w, "cancel"):
                     w.cancel()
                 w.requestInterruption()
-                w.wait(2000)
+                if wait_ms:
+                    w.wait(wait_ms)
 
     def closeEvent(self, event) -> None:
         self.cancel_all()
