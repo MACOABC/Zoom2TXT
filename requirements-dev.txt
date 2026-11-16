@@ -2,4 +2,4 @@
 ruff==0.16.6
 pip-audit==2.9.0
 pyinstaller==6.21.0
-Pillow==12.3.0
+Pillow==13.0.0
