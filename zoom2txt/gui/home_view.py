@@ -34,17 +34,25 @@ class _PendingRow(QFrame):
         super().__init__()
         self.setObjectName("plain")
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(0, 6, 0, 6)
+        lay.setContentsMargins(0, 7, 0, 7)
         lay.setSpacing(10)
-        lay.addWidget(widgets.icon_label("video", "FAINT", 16))
+        lay.addWidget(widgets.icon_label("video", "FAINT", 16), 0, Qt.AlignmentFlag.AlignTop)
+        text = QVBoxLayout()
+        text.setSpacing(1)
         name = widgets.ElidedLabel(course)
-        lay.addWidget(name, 1)
-        when = QLabel(date)
+        text.addWidget(name)
+        try:
+            year, month, day = date.split("-")
+            shown = f"{day}/{month}/{year}"
+        except ValueError:
+            shown = date
+        when = QLabel(shown + (f" · Semana {week}" if week else ""))
         when.setObjectName("faint")
-        lay.addWidget(when)
-        if week:
-            lay.addWidget(widgets.chip(f"S{week}"))
-        lay.addWidget(widgets.chip(status, widgets.status_tone(status)))
+        text.addWidget(when)
+        lay.addLayout(text, 1)
+        lay.addWidget(
+            widgets.chip(status, widgets.status_tone(status)), 0, Qt.AlignmentFlag.AlignVCenter
+        )
 
 
 class HomeView(QWidget):

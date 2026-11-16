@@ -981,6 +981,37 @@ class InterfaceTests(Case):
         dialog.restart()
         self.assertEqual(dialog.pages.currentIndex(), 0)
 
+    def test_friendly_titles_keep_real_names_available(self):
+        from zoom2txt.library import friendly_title
+
+        raw = "AprendizDeMaquina755_Semana05_2026-09-22_198c495c"
+        self.assertEqual(friendly_title(raw), "Semana 5 · 22/09/2026")
+        self.assertEqual(
+            friendly_title(raw, with_course=True), "AprendizDeMaquina755 · Semana 5 · 22/09/2026"
+        )
+        self.assertEqual(friendly_title("Calculo_Clase03"), "Clase 3")
+        self.assertEqual(friendly_title("semana_1.2_v8.pptx_6ce1a2b3", is_class=False), "semana_1.2_v8.pptx")
+        self.assertEqual(
+            friendly_title("Silabo_Arquitectura_Semana01", is_class=False), "Silabo_Arquitectura_Semana01"
+        )
+        self.assertEqual(friendly_title("Notas sueltas"), "Notas sueltas")
+        self.source(raw, "Regresión logística y la función sigmoide.", "ml", "Aprendizaje de Máquina")
+        window = self.window()
+        window._navigate(PAGE_ASSISTANT)
+        view = window.assistant
+        item = view._iter_source_items()[0]
+        self.assertEqual(item.text(0), "Semana 5 · 22/09/2026")
+        self.assertIn(raw, item.toolTip(0))
+        view.sources_search.setText("198c495c")  # el filtro también busca en el nombre real
+        self.assertFalse(item.isHidden())
+        view.sources_search.setText("no existe")
+        self.assertTrue(item.isHidden())
+        view.sources_search.setText("")
+        view.week_filter_combo.setCurrentIndex(view.week_filter_combo.findData("final"))
+        self.assertEqual(view.get_active_source_ids(), [])  # semana 5 no entra en el final
+        view.week_filter_combo.setCurrentIndex(view.week_filter_combo.findData("parcial"))
+        self.assertEqual(len(view.get_active_source_ids()), 1)
+
     def test_status_tones_and_theme_switch(self):
         from zoom2txt.gui import style, widgets
 

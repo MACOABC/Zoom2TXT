@@ -56,6 +56,7 @@ from zoom2txt.gui.workers import (
     RagSyncWorker,
     StudyWorker,
 )
+from zoom2txt.library import friendly_title
 from zoom2txt.rag_engine import FULL_CONTEXT_WORDS, RAGEngine, RAGResponse, infer_source_week
 from zoom2txt.storage import StateStore, atomic_write
 
@@ -736,7 +737,8 @@ class _MessageWidget(QFrame):
         numbered = [c for c in citations if c.get("n")]
         for citation in numbered[:14]:
             title = str(citation.get("source_title", "Fuente"))
-            short = title if len(title) <= 34 else title[:32] + "…"
+            short = friendly_title(title, is_class=citation.get("source_type") == "transcript")
+            short = short if len(short) <= 34 else short[:32] + "…"
             where = citation.get("locator", "")
             chip = QPushButton(f"{citation['n']} · {short}" + (f" · {where}" if where and len(where) < 18 else ""))
             chip.setProperty("variant", "chip")
@@ -856,6 +858,8 @@ class ChatTranscript(QScrollArea):
         )
         self._layout.insertWidget(0, box)
         box.show()
+        self._pinned = False
+        QTimer.singleShot(0, lambda: self.verticalScrollBar().setValue(0))
 
     def _drop_welcome(self) -> None:
         if self._welcome is not None:
@@ -866,6 +870,8 @@ class ChatTranscript(QScrollArea):
             self._welcome_html = ""
 
     def add_message(self, role: str) -> _MessageWidget:
+        if self._welcome is not None:
+            self._pinned = True
         self._drop_welcome()
         widget = _MessageWidget(role)
         widget.cite_clicked.connect(lambda n, w=widget: self.cite_clicked.emit(w, n))
@@ -1401,7 +1407,11 @@ class AssistantView(QWidget):
 
             def add(parent, src) -> None:
                 icon_name, badge = SOURCE_BADGES.get(src["source_type"], ("file-text", "Fuente"))
-                item = QTreeWidgetItem(parent, [src["title"]])
+                item = QTreeWidgetItem(
+                    parent,
+                    [friendly_title(src["title"], is_class=src["source_type"] == "transcript")],
+                )
+                item.setData(0, Qt.ItemDataRole.UserRole + 2, src["title"])
                 item.setFlags(
                     Qt.ItemFlag.ItemIsEnabled
                     | Qt.ItemFlag.ItemIsUserCheckable
@@ -1415,7 +1425,7 @@ class AssistantView(QWidget):
                 words = int(src.get("word_count") or 0)
                 item.setToolTip(
                     0,
-                    f"{badge} · {src['course_name']}\n"
+                    f"{src['title']}\n{badge} · {src['course_name']}\n"
                     + (f"{words:,} palabras\n".replace(",", " ") if words else "")
                     + src["file_path"],
                 )
@@ -1534,9 +1544,9 @@ class AssistantView(QWidget):
         def decide(item: QTreeWidgetItem) -> bool:
             if mode == "all":
                 return True
-            week = infer_source_week(item.text(0)) or infer_source_week(
-                str(item.data(0, Qt.ItemDataRole.UserRole + 1) or "")
-            )
+            week = infer_source_week(
+                str(item.data(0, Qt.ItemDataRole.UserRole + 2) or item.text(0))
+            ) or infer_source_week(str(item.data(0, Qt.ItemDataRole.UserRole + 1) or ""))
             if mode == "parcial":
                 return week is None or (1 <= week <= 7)
             return week is None or (8 <= week <= 20)
@@ -1548,7 +1558,8 @@ class AssistantView(QWidget):
 
         query = _fold(self.sources_search.text()).strip()
         for item in self._iter_source_items():
-            item.setHidden(bool(query) and query not in _fold(item.text(0)))
+            haystack = _fold(f"{item.text(0)} {item.data(0, Qt.ItemDataRole.UserRole + 2) or ''}")
+            item.setHidden(bool(query) and query not in haystack)
 
     def _source_context_menu(self, position) -> None:
         item = self.sources_tree.itemAt(position)
@@ -1566,7 +1577,11 @@ class AssistantView(QWidget):
         if sid is None:
             return
         self._open_reader(
-            {"path": item.data(0, Qt.ItemDataRole.UserRole + 1), "source_title": item.text(0), "source_id": sid}
+            {
+                "path": item.data(0, Qt.ItemDataRole.UserRole + 1),
+                "source_title": item.data(0, Qt.ItemDataRole.UserRole + 2) or item.text(0),
+                "source_id": sid,
+            }
         )
 
     def _remove_source(self, item: QTreeWidgetItem) -> None:

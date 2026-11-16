@@ -31,11 +31,14 @@ El flujo no cambia: Blackboard → Zoom → YouTube → subtítulos → TXT veri
 
 - Esquema SQLite v3 con migración atómica y copia de seguridad automática previa.
 - Registro de actividad en disco con datos sensibles ocultos y rotación.
-- Inventario, pendientes y portada calculados en una sola lectura; huellas SHA-256 memorizadas por identidad de archivo. La suite pasó de ~97 s a ~47 s con 43 pruebas más.
+- Inventario, pendientes y portada calculados en una sola lectura; huellas SHA-256 memorizadas por identidad de archivo. La suite pasó de ~97 s a ~47 s con 44 pruebas más.
 - Corregido: la sincronización de carpetas reasignaba el curso de una fuente por su nombre de archivo.
 - Corregido: carrera al abrir por primera vez la base desde varios hilos.
+- Corregido: el filtro Parcial/Final del asistente no reconocía la semana en nombres con fecha (`…_Semana05_2026-09-22_…`).
+- Las clases se muestran con nombres legibles («Semana 5 · 22/09/2026») en fuentes y citas; el nombre real sigue en el tooltip y en disco.
+- Dependencias auditadas: Pillow 13.0.0 por avisos de seguridad; cierre de ejecución regenerado.
 - Opción para buscar clases nuevas al abrir la aplicación.
-- 237 pruebas automatizadas con HTTP real bloqueado.
+- 238 pruebas automatizadas con HTTP real bloqueado.
 
 ## 2.8.0 — Búsqueda de grabaciones por curso y Asistente IA en la Nube
 

@@ -690,7 +690,8 @@ def _resolve_course_identity(
 
 def infer_source_week(value: str) -> int | None:
     """Extrae el número de semana (1-20) desde el título o ruta de una fuente."""
-    m = re.search(r"(?:semana|sem)[\s_-]*0*(\d{1,2})\b", str(value or ""), flags=re.I)
+    # (?!\d) en vez de \b: en «Semana05_2026-09-22» el número va seguido de «_».
+    m = re.search(r"(?:semana|sem)[\s_-]*0*(\d{1,2})(?!\d)", str(value or ""), flags=re.I)
     if m:
         w = int(m.group(1))
         if 1 <= w <= 20:

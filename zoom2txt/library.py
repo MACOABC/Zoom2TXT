@@ -101,6 +101,31 @@ def _course_from_name(name: str) -> str:
     return m.group(1) if m else name
 
 
+_CLASS_NAME = re.compile(
+    r"^(?P<course>.+?)_(?P<kind>Semana|Clase)0*(?P<number>\d{1,3})"
+    r"(?:_(?P<date>\d{4}-\d{2}-\d{2}))?(?:_[0-9a-f]{8})?$"
+)
+_HASH_SUFFIX = re.compile(r"_[0-9a-f]{8}$")
+
+
+def friendly_title(name: str, with_course: bool = False, is_class: bool = True) -> str:
+    """Nombre legible de una fuente para listas estrechas.
+
+    'AprendizDeMaquina755_Semana05_2026-09-22_198c495c' → 'Semana 5 · 22/09/2026'
+    (con ``with_course`` antepone el curso). Los materiales (``is_class=False``)
+    solo pierden el sufijo técnico de ocho caracteres. El nombre real no cambia
+    en disco."""
+    text = str(name or "").strip()
+    match = _CLASS_NAME.match(text) if is_class else None
+    if not match:
+        return _HASH_SUFFIX.sub("", text) or text
+    label = f"{match['kind']} {int(match['number'])}"
+    if match["date"]:
+        year, month, day = match["date"].split("-")
+        label += f" · {day}/{month}/{year}"
+    return f"{match['course']} · {label}" if with_course else label
+
+
 def _week_from_name(name: str) -> int | None:
     m = re.search(r"_Semana(\d+)", name)
     return int(m.group(1)) if m else None
