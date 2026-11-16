@@ -1,16 +1,11 @@
-"""Gráficos ligeros dibujados con QPainter (sin dependencias externas):
-tarjeta KPI y gráfico de barras, en el lenguaje visual del tema."""
+"""Gráficos ligeros dibujados con QPainter (sin dependencias externas), en el
+lenguaje visual del tema: tarjeta KPI clásica y barras con valores."""
 
 from __future__ import annotations
 
 from PySide6.QtCore import QRectF, Qt
-from PySide6.QtGui import (
-    QColor,
-    QFont,
-    QPainter,
-    QPen,
-)
-from PySide6.QtWidgets import QFrame, QSizePolicy, QVBoxLayout, QWidget
+from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPen
+from PySide6.QtWidgets import QFrame, QLabel, QSizePolicy, QVBoxLayout, QWidget
 
 from zoom2txt.gui import style
 
@@ -25,86 +20,95 @@ class StatCard(QFrame):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 8, 12, 8)
         lay.setSpacing(4)
-        from PySide6.QtWidgets import QLabel
-
         num = QLabel(value)
-        num.setStyleSheet(f"font-size: 26px; font-weight: 700; color: {accent or style.LINK};")
+        num.setObjectName("kpiValue")
+        if accent:
+            num.setStyleSheet(f"color: {accent};")
         lbl = QLabel(label)
-        lbl.setStyleSheet(f"font-size: 13px; color: {style.MUTED};")
+        lbl.setObjectName("kpiLabel")
         lbl.setWordWrap(True)
         lay.addWidget(num)
         lay.addWidget(lbl)
         if sub:
             s = QLabel(sub)
             s.setWordWrap(True)
-            s.setStyleSheet(f"font-size: 12px; color: {style.MUTED};")
+            s.setObjectName("faint")
             lay.addWidget(s)
         lay.addStretch()
 
 
 class BarChart(QWidget):
-    """Barras verticales con etiquetas. data: lista de (etiqueta, valor)."""
+    """Barras verticales con etiquetas. data: lista de (etiqueta, valor).
+    ``accent`` acepta un color o el nombre de un token de ``style``."""
 
     def __init__(self, title: str, data: list[tuple[str, float]], accent: str | None = None):
         super().__init__()
         self._title = title
         self._data = data
-        self._accent = accent or style.LINK
-        self.setMinimumHeight(180)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self._accent = accent or "ACCENT"
+        self.setMinimumHeight(176)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        style.on_theme_change(self.update)
 
     def set_data(self, data: list[tuple[str, float]]) -> None:
         self._data = data
         self.update()
+
+    def _color(self) -> QColor:
+        return QColor(getattr(style, self._accent, self._accent))
 
     def paintEvent(self, event) -> None:
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         w, h = self.width(), self.height()
 
-        # fondo tarjeta
         p.setBrush(QColor(style.SURFACE))
         p.setPen(QPen(QColor(style.BORDER), 1))
-        p.drawRoundedRect(QRectF(0.5, 0.5, w - 1, h - 1), 8, 8)
+        p.drawRoundedRect(QRectF(0.5, 0.5, w - 1, h - 1), style.RADIUS, style.RADIUS)
 
-        pad = 16
-        # título
+        pad = 18
         p.setPen(QColor(style.TEXT))
         f = QFont()
         f.setPixelSize(14)
         f.setWeight(QFont.Weight.DemiBold)
         p.setFont(f)
-        p.drawText(
-            QRectF(pad, pad - 4, w - 2 * pad, 22),
-            Qt.AlignmentFlag.AlignLeft,
-            self._title,
-        )
+        p.drawText(QRectF(pad, pad - 4, w - 2 * pad, 22), Qt.AlignmentFlag.AlignLeft, self._title)
 
         if not self._data:
-            p.setPen(QColor(style.MUTED))
-            p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "Sin datos todavía")
+            p.setPen(QColor(style.FAINT))
+            small = QFont()
+            small.setPixelSize(13)
+            p.setFont(small)
+            p.drawText(self.rect().adjusted(0, 18, 0, 0), Qt.AlignmentFlag.AlignCenter, "Sin datos todavía")
             p.end()
             return
 
-        top = pad + 28
-        bottom = h - pad - 22  # espacio para etiquetas
-        chart_h = bottom - top
+        top = pad + 34
+        bottom = h - pad - 20  # espacio para etiquetas
+        chart_h = max(10, bottom - top)
         vmax = max(v for _, v in self._data) or 1
         n = len(self._data)
         gap = 10
         slot = max(1.0, (w - 2 * pad) / n)
-        bw = max(1.0, min(40.0, slot - gap))
+        bw = max(2.0, min(34.0, slot - gap))
         label_every = max(1, int(48 / slot) + (1 if slot < 48 else 0))
-        p.setPen(QPen(QColor(style.BORDER_HI), 1))
+        p.setPen(QPen(QColor(style.BORDER), 1))
         p.drawLine(int(pad), int(bottom), int(w - pad), int(bottom))
 
+        base = self._color()
         fsmall = QFont()
         fsmall.setPixelSize(11)
+        fsmall.setWeight(QFont.Weight.DemiBold)
         for i, (label, value) in enumerate(self._data):
             x = pad + i * slot + (slot - bw) / 2
             bh = chart_h * (value / vmax)
             y = bottom - bh
-            p.setBrush(QColor(self._accent))
+            gradient = QLinearGradient(0, y, 0, bottom)
+            gradient.setColorAt(0.0, base)
+            faded = QColor(base)
+            faded.setAlphaF(0.45)
+            gradient.setColorAt(1.0, faded)
+            p.setBrush(gradient)
             p.setPen(Qt.PenStyle.NoPen)
             radius = min(6.0, bw / 2)
             p.drawRoundedRect(QRectF(x, y, bw, max(bh, 2)), radius, radius)
@@ -112,7 +116,6 @@ class BarChart(QWidget):
             if i % label_every:
                 continue
 
-            # valor encima
             p.setPen(QColor(style.TEXT))
             p.setFont(fsmall)
             p.drawText(
@@ -120,8 +123,7 @@ class BarChart(QWidget):
                 Qt.AlignmentFlag.AlignCenter,
                 str(int(value)),
             )
-            # etiqueta debajo
-            p.setPen(QColor(style.MUTED))
+            p.setPen(QColor(style.FAINT))
             p.drawText(
                 QRectF(pad + i * slot + 3, bottom + 4, max(1, slot - 6), 18),
                 Qt.AlignmentFlag.AlignCenter,

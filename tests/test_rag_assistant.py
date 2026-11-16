@@ -349,7 +349,7 @@ class RagAssistantTests(unittest.TestCase):
         def fake_generate_content(*, model, contents, config):
             called_models.append(model)
             captured_configs.append(config)
-            if model == "gemini-3.5-flash":
+            if model == "gemini-3.6-flash":
                 raise RuntimeError("429 RESOURCE_EXHAUSTED: Quota exceeded, retry in 15s")
             return NS(
                 text="El examen final se realiza en la semana 16 `[Curso: Arquitectura de Software | Fuente: Arquitectura_Clase01]`."
@@ -364,11 +364,12 @@ class RagAssistantTests(unittest.TestCase):
                 "¿Cuándo es el examen final?",
                 course_id="arq-101",
                 all_courses=False,
-                preferred_model="gemini-3.5-flash",
+                preferred_model="gemini-3.6-flash",
             )
 
-        self.assertEqual(called_models[0], "gemini-3.5-flash")
+        self.assertEqual(called_models[0], "gemini-3.6-flash")
         self.assertEqual(resp.model_used, "gemini-3.5-flash-lite")
+        self.assertEqual(resp.fallback_from, "gemini-3.6-flash")
         self.assertIn("semana 16", resp.answer)
         self.assertEqual(captured_configs[0].system_instruction, STRICT_SYSTEM_PROMPT)
         self.assertAlmostEqual(captured_configs[0].temperature, 0.1)
@@ -422,9 +423,10 @@ class RagAssistantTests(unittest.TestCase):
             )
 
         self.assertEqual(called_models[0], "gemini-3.8-flash")
-        self.assertEqual(resp.model_used, "gemini-3.5-flash")
+        # La cadena de conversación continúa con el modelo ligero de mayor cuota.
+        self.assertEqual(resp.model_used, "gemini-3.5-flash-lite")
+        self.assertEqual(resp.fallback_from, "gemini-3.8-flash")
         self.assertIn("Zero Trust", resp.answer)
-        self.assertIn("alta demanda temporal", resp.answer)
 
     def test_all_models_503_raises_friendly_unavailable_error(self):
         """Verifica que si todos los modelos arrojan 503, se devuelva un mensaje amigable al estudiante."""
@@ -495,7 +497,7 @@ class RagAssistantTests(unittest.TestCase):
             from zoom2txt.gui.assistant_view import ApiKeyGuideDialog
 
             self.assertIn("aistudio.google.com/apikey", view.chat_view.toHtml())
-            self.assertEqual(view.guide_btn.text(), "❓ Cómo configurar")
+            self.assertEqual(view.guide_btn.text(), "Cómo configurar")
             guide_dlg = ApiKeyGuideDialog(view)
             self.assertIn("1 minuto", guide_dlg.windowTitle())
             guide_dlg.close()
@@ -512,7 +514,7 @@ class RagAssistantTests(unittest.TestCase):
             view._countdown_timer.stop()
 
             # Verificar botones de estudio rápido y filtro de semanas
-            self.assertEqual(len(view.quick_prompt_btns), 4)
+            self.assertEqual(len(view.quick_prompt_btns), 6)
             idx_parcial = view.week_filter_combo.findData("parcial")
             self.assertGreaterEqual(idx_parcial, 0)
             view.week_filter_combo.setCurrentIndex(idx_parcial)

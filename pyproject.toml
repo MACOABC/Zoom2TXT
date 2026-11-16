@@ -54,3 +54,5 @@ ignore = [
 "tests/*.py" = ["E402", "S108", "S311"]
 "scripts/*.py" = ["S310"]
 "scripts/capture_portfolio.py" = ["E402"]
+# «token» en widgets.py es el nombre de un color del tema, no una credencial.
+"zoom2txt/gui/widgets.py" = ["S107"]

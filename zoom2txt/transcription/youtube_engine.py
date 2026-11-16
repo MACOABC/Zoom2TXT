@@ -6,6 +6,7 @@ import json
 import re
 import tempfile
 import threading
+import time
 from pathlib import Path
 
 from google.auth.exceptions import RefreshError, TransportError
@@ -19,6 +20,7 @@ from googleapiclient.http import MediaFileUpload, build_http
 from zoom2txt.cleaning.subtitle_cleaner import vtt_a_texto
 from zoom2txt.download.zoom_downloader import yt_dlp_path
 from zoom2txt.processes import run_process
+from zoom2txt.progress import STAGE_CAPTIONS, STAGE_UPLOAD, human_bytes, human_eta, report
 from zoom2txt.security import read_private_json, write_private_json
 from zoom2txt.storage import atomic_write, safe_name
 from zoom2txt.transcription.js_runtime import youtube_js_args
@@ -176,6 +178,9 @@ def _complete_resumable_upload(request, log, cancel, checkpoint):
         active_transport = transport
     response = None
     last_percent = -1
+    started = time.monotonic()
+    first_bytes = None
+    report(log, STAGE_UPLOAD, None, "Conectando con YouTube…")
     while response is None:
         if cancel is not None and cancel.is_set():
             raise InterruptedError("Subida pausada. Se conserva su estado.")
@@ -195,6 +200,23 @@ def _complete_resumable_upload(request, log, cancel, checkpoint):
             if percent // 10 > last_percent // 10:
                 log(f"[*] Preparación: {percent}% confirmado.")
                 last_percent = percent
+            try:
+                sent = float(progress.resumable_progress)
+                total = float(progress.total_size or 0)
+                if first_bytes is None:
+                    # Una subida reanudada parte del desplazamiento ya confirmado.
+                    first_bytes, started = sent, time.monotonic()
+                elapsed = time.monotonic() - started
+                speed = (sent - first_bytes) / elapsed if elapsed > 1 else 0
+                detail = human_bytes(sent) + (f" de {human_bytes(total)}" if total else "")
+                if speed > 0:
+                    detail += f" · {human_bytes(speed)}/s"
+                    remaining = human_eta((total - sent) / speed) if total else ""
+                    if remaining:
+                        detail += f" · faltan {remaining}"
+                report(log, STAGE_UPLOAD, progress.progress(), detail)
+            except (AttributeError, TypeError, ValueError, ZeroDivisionError):
+                report(log, STAGE_UPLOAD, percent / 100, "")
     video_id = response["id"]
     if checkpoint is not None:
         checkpoint["save"](video_id=video_id, status="uploaded", upload_uri="")
@@ -277,6 +299,12 @@ def descargar_subtitulos(
             if cancel.is_set():
                 return None
             log(f"[*] Consultando subtítulos ({attempt + 1}/{max_attempts})…")
+            report(
+                log,
+                STAGE_CAPTIONS,
+                None,
+                "Consultando a YouTube…" if max_attempts == 1 else f"Consulta {attempt + 1}",
+            )
             data = None
             if private:
                 _quota(store, 50)

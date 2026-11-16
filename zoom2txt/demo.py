@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt, QTimer
 
+from zoom2txt import study
 from zoom2txt.config import DATA_DIR, Settings
-from zoom2txt.gui.main_window import MainWindow
-from zoom2txt.rag_engine import RAGResponse, ingest_file
+from zoom2txt.gui.main_window import PAGE_ASSISTANT, PAGE_CLASSES, PAGE_LIBRARY, MainWindow
+from zoom2txt.rag_engine import RAGEngine, RAGResponse, ingest_file
 from zoom2txt.storage import atomic_write
 
 DEMO_COURSES = (
@@ -62,6 +63,7 @@ class DemoMainWindow(MainWindow):
         self._demo_queue: list[int] = []
         self._demo_position = 0
         self._demo_stage = 0
+        self._demo_tick = 0
         super().__init__(settings)
         self._refresh_courses()
         self.setWindowTitle("Zoom2TXT · Demostración")
@@ -70,12 +72,17 @@ class DemoMainWindow(MainWindow):
         self.history_btn.setEnabled(False)
         self.history_btn.setToolTip("La demostración no conserva historial.")
         for index, button in enumerate(self._nav_buttons):
-            if index not in (0, 3, 6):
+            if index not in (PAGE_CLASSES, PAGE_LIBRARY, PAGE_ASSISTANT):
                 button.setEnabled(False)
                 button.setToolTip(
                     "Esta sección requiere una cuenta real y está desactivada en la demostración."
                 )
+        self.quota_title.setText("Demostración")
+        self.quota_note.setText("Datos sintéticos, sin red")
         self._setup_demo_assistant()
+
+    def _initial_page(self) -> int:
+        return PAGE_CLASSES
 
     def _setup_demo_assistant(self) -> None:
         demo_txt = (
@@ -116,6 +123,7 @@ class DemoMainWindow(MainWindow):
         )
         self.assistant._initial_sync_done = True
         self.assistant.demo_responder = self._demo_rag_answer
+        self.assistant.demo_study = self._demo_study
         self.assistant.refresh()
 
     def _demo_rag_answer(self, question: str, active_ids: list[int]) -> RAGResponse:
@@ -126,30 +134,75 @@ class DemoMainWindow(MainWindow):
             active_source_ids=active_ids,
             use_embeddings=False,
         )
-        citations = [
-            {
-                "course_name": c.course_name,
-                "source_title": c.source_title,
-                "source_type": c.source_type,
-                "chunk_index": c.chunk_index,
-            }
-            for c in chunks
-        ]
+        passages = RAGEngine.passages_from_chunks(chunks)
+        by_title = {p.title: p.number for p in passages}
+        clase = by_title.get("ArquitecturaDeSoftware_Semana02_2026-09-01")
+        silabo = by_title.get("Silabo_Arquitectura_Semana01")
+
+        def cite(number) -> str:
+            return f" [{number}]" if number else ""
+
         answer = (
-            "### Respuesta de Demostración (100% Offline)\n\n"
-            "Según las fuentes indexadas del curso:\n"
-            "- Se estudió **Clean Architecture**, la regla de dependencia hacia el dominio y el patrón de "
-            "puertos y adaptadores `[Curso: ARQUITECTURA DE SOFTWARE / DEMO-101 | Fuente: ArquitecturaDeSoftware_Semana02_2026-09-01]`.\n"
-            "- Los conceptos clave incluyen **SOLID, Arquitectura Hexagonal y CQRS**, y la entrega del proyecto "
-            "parcial está programada para la **Semana 7** (examen parcial el **15 de octubre**) "
-            "`[Curso: ARQUITECTURA DE SOFTWARE / DEMO-101 | Fuente: Silabo_Arquitectura_Semana01]`."
+            "### Respuesta de demostración (sin conexión)\n\n"
+            "Según las fuentes del curso ARQUITECTURA DE SOFTWARE / DEMO-101:\n"
+            "- Se estudió **Clean Architecture**, la regla de dependencia hacia el dominio y el "
+            f"patrón de puertos y adaptadores{cite(clase)}.\n"
+            "- Los conceptos clave incluyen **SOLID, Arquitectura Hexagonal y CQRS**, y la entrega "
+            "del proyecto parcial está programada para la **Semana 7** (examen parcial el "
+            f"**15 de octubre**){cite(silabo) or cite(clase)}."
         )
         return RAGResponse(
             answer=answer,
-            citations=citations,
-            model_used="demo-offline-cloud-preview",
+            citations=RAGEngine.citations_for(answer, passages),
+            model_used="demo-sin-conexion",
             chunks=chunks,
+            mode="retrieval" if passages else "none",
+            passages=passages,
         )
+
+    def _demo_study(self, tool_key: str, count: int) -> study.StudyResult:
+        """Tarjetas y simulacro sintéticos para recorrer la interfaz sin API."""
+        tool = study.TOOLS[tool_key]
+        if tool.kind == "flashcards":
+            items = [
+                {"front": "¿Qué establece la regla de dependencia?",
+                 "back": "Que el código solo puede depender hacia adentro: el dominio no conoce la "
+                         "infraestructura.", "source": 1},
+                {"front": "¿Qué es un puerto en arquitectura hexagonal?",
+                 "back": "Una interfaz definida por el dominio que describe lo que necesita del "
+                         "exterior.", "source": 1},
+                {"front": "¿Qué separa CQRS?",
+                 "back": "Las operaciones de escritura (comandos) de las de lectura (consultas).",
+                 "source": 2},
+                {"front": "¿Cuándo es la entrega del proyecto parcial?",
+                 "back": "En la Semana 7 del ciclo.", "source": 2},
+            ]
+        else:
+            items = [
+                {"question": "¿Hacia dónde apuntan las dependencias en Clean Architecture?",
+                 "options": ["Hacia la base de datos", "Hacia el dominio", "Hacia la interfaz",
+                             "Hacia el framework"],
+                 "answer": 1,
+                 "explanation": "La regla de dependencia exige que todo dependa del dominio.",
+                 "source": 1},
+                {"question": "¿Qué patrón desacopla la base de datos del dominio?",
+                 "options": ["Singleton", "Puertos y adaptadores", "Active Record", "Fachada"],
+                 "answer": 1,
+                 "explanation": "Los adaptadores implementan los puertos definidos por el dominio.",
+                 "source": 1},
+                {"question": "¿Qué semanas evalúa el examen parcial?",
+                 "options": ["1 a 4", "1 a 7", "8 a 16", "Todas"],
+                 "answer": 1,
+                 "explanation": "La clase indica que el parcial evalúa las Semanas 1 a 7.",
+                 "source": 1},
+            ]
+        return study.StudyResult(
+            kind=tool.kind,
+            tool=tool.key,
+            title="Arquitectura de Software (demo)",
+            items=items[: max(1, count)],
+            model_used="demo-sin-conexion",
+        )  # fmt: skip
 
     def _setup_tray(self) -> None:
         self.tray = None
@@ -244,11 +297,25 @@ class DemoMainWindow(MainWindow):
         self.queue_label.setText(
             f"Clase {self._demo_position + 1}/{len(self._demo_queue)} · {item['course_name']}"
         )
+        self.queue_label.show()
+        self._queue_total = len(self._demo_queue)
+        self._set_activity("Simulando", None, "info", True)
         if self._demo_stage == 0:
             self._log(f"[*] Preparando {item['name']} con datos sintéticos…")
         if self._demo_stage < 3:
+            if self._demo_stage < 2 and self._demo_tick < 4:
+                # Avance simulado de descarga y subida, como en una clase real.
+                self._demo_tick += 1
+                total = 286.0
+                done = total * self._demo_tick / 4
+                self._on_progress(
+                    self._demo_stage, self._demo_tick / 4, f"{done:.0f} de {total:.0f} MB · 9.4 MB/s"
+                )
+                QTimer.singleShot(150, self._advance_demo)
+                return
+            self._demo_tick = 0
             self._demo_stage += 1
-            QTimer.singleShot(360, self._advance_demo)
+            QTimer.singleShot(300, self._advance_demo)
             return
 
         transcript = self.settings.transcripts_dir / f"{item['name']}_Para_NotebookLM.txt"
@@ -282,5 +349,8 @@ class DemoMainWindow(MainWindow):
             "Demostración completada. Abre Biblioteca para revisar los TXT sintéticos."
         )
         self.queue_label.setText(f"{len(self._demo_queue)} TXT sintéticos verificados")
+        self._set_activity(
+            "Demostración lista", f"{len(self._demo_queue)} TXT sintéticos verificados", "success"
+        )
         self._demo_queue = []
         self._active_queue_index = None

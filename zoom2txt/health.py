@@ -9,6 +9,7 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
 
+from zoom2txt.ai_models import model_label
 from zoom2txt.config import BB_COOKIES_FILE, Settings, credentials_status, load_gemini_api_key
 from zoom2txt.download.zoom_downloader import yt_dlp_path
 from zoom2txt.processes import run_process
@@ -171,8 +172,8 @@ def quick_health(settings: Settings) -> list[HealthResult]:
                 "ai_assistant",
                 "Asistente IA (Gemini Cloud)",
                 "ok",
-                f"Clave configurada ({settings.gemini_model})",
-                "100% Cloud Free Tier (BYOK) · 0% consumo de IA local en tu PC.",
+                f"Clave configurada · modelo {model_label(settings.gemini_model)}",
+                "Capa gratuita de Google AI Studio con tu propia clave; la IA no corre en tu PC.",
             )
         )
     else:
@@ -182,7 +183,7 @@ def quick_health(settings: Settings) -> list[HealthResult]:
                 "Asistente IA (Gemini Cloud)",
                 "warning",
                 "Opcional · Sin GEMINI_API_KEY",
-                "Configura tu clave gratuita en Asistente IA o Ajustes (Costo $0, sin tarjeta).",
+                "Configura tu clave gratuita en Asistente IA o Ajustes (sin tarjeta).",
             )
         )
     return results

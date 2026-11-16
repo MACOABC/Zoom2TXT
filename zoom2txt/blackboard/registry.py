@@ -93,11 +93,26 @@ class Registry:
     def records(self):
         return self.store.list("recording")
 
-    def is_processed(self, course_id, meeting_id):
-        row = self.store.get("recording", recording_key(course_id, meeting_id))
+    @staticmethod
+    def _row_processed(row) -> bool:
         if row.get("status") == "done":
-            return file_ok(row.get("path"), row.get("checksum", ""))
+            # La huella se memoriza por identidad del archivo: un TXT modificado
+            # cambia de tamaño, fecha o inode y se vuelve a calcular.
+            return file_ok(row.get("path"), row.get("checksum", ""), cached=True)
         return row.get("status") in ("omitted", "duplicate", "legacy_review")
+
+    def is_processed(self, course_id, meeting_id):
+        return self._row_processed(
+            self.store.get("recording", recording_key(course_id, meeting_id))
+        )
+
+    def processed_keys(self) -> set[str]:
+        """Claves de todas las grabaciones ya resueltas, con una sola consulta."""
+        return {
+            key
+            for key, row in self.store.get_many("recording").items()
+            if self._row_processed(row)
+        }
 
     def next_number(self, course_id):
         return 1 + len(

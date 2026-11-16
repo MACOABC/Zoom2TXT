@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
-from PySide6.QtCore import QUrl
+from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -107,6 +107,13 @@ class SettingsDialog(QDialog):
             "No borra ni omite las demás. Desactívalo para ver todas las sesiones."
         )
         form.addRow("", self.longest)
+        self.scan_on_start = QCheckBox("Buscar clases nuevas al abrir la aplicación")
+        self.scan_on_start.setChecked(getattr(settings, "scan_on_start", False))
+        self.scan_on_start.setToolTip(
+            "Al iniciar, revisa Blackboard y deja la tanda lista. No descarga ni sube nada "
+            "hasta que pulses Procesar."
+        )
+        form.addRow("", self.scan_on_start)
         self.visibility = QComboBox()
         self.visibility.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.visibility.setSizeAdjustPolicy(
@@ -175,14 +182,16 @@ class SettingsDialog(QDialog):
             button.clicked.connect(callback)
             lay.addWidget(button)
 
-        ai_form = section("Asistente IA en la Nube (Gemini Free Tier · BYOK · 0% consumo en tu PC)")
-        from zoom2txt.config import AI_STUDIO_APIKEY_URL, FREE_TIER_MODELS
+        ai_form = section("Asistente IA (Gemini, con tu propia clave gratuita)")
+        from zoom2txt.ai_models import AUTO_MODEL, ModelRouter
+        from zoom2txt.config import AI_STUDIO_APIKEY_URL
 
         ai_help = QLabel(
-            "Guía rápida (1 minuto · Costo $0 sin tarjeta · 0% IA local en tu PC):\n"
-            "1) Abre aistudio.google.com/apikey con tu cuenta personal de Google (@gmail.com).\n"
-            "2) Pulsa «Create API key» y copia la clave (empieza con AIzaSy…).\n"
-            "3) Pégala abajo y pulsa «Probar Conexión API»."
+            "La IA corre en la nube de Google con tu clave de AI Studio: sin tarjeta y sin "
+            "cargar tu PC.\n"
+            "1) Abre aistudio.google.com/apikey con tu cuenta personal de Google.\n"
+            "2) Pulsa «Create API key» y copia la clave.\n"
+            "3) Pégala abajo y pulsa «Probar conexión»."
         )
         ai_help.setObjectName("muted")
         ai_help.setWordWrap(True)
@@ -190,18 +199,40 @@ class SettingsDialog(QDialog):
 
         self.gemini_key_edit = QLineEdit(settings.gemini_api_key)
         self.gemini_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
-        self.gemini_key_edit.setPlaceholderText("AIzaSy… (clave gratuita de Google AI Studio)")
+        self.gemini_key_edit.setPlaceholderText("Clave gratuita de Google AI Studio")
         ai_form.addRow("GEMINI_API_KEY", self.gemini_key_edit)
 
         self.gemini_model_combo = QComboBox()
-        for m in FREE_TIER_MODELS:
-            self.gemini_model_combo.addItem(m, m)
+        self.gemini_model_combo.addItem("Automático (recomendado)", AUTO_MODEL)
+        try:
+            from zoom2txt.storage import StateStore
+
+            models = ModelRouter(StateStore(settings)).available()
+        except Exception:  # noqa: BLE001 — sin base local aún: solo Automático
+            models = []
+        for info in models:
+            self.gemini_model_combo.addItem(info.label, info.id)
+            self.gemini_model_combo.setItemData(
+                self.gemini_model_combo.count() - 1, info.blurb, Qt.ItemDataRole.ToolTipRole
+            )
         idx = self.gemini_model_combo.findData(settings.gemini_model)
         self.gemini_model_combo.setCurrentIndex(max(0, idx))
-        ai_form.addRow("Modelo Free Tier", self.gemini_model_combo)
+        self.gemini_model_combo.setToolTip(
+            "Automático usa un modelo ligero para conversar y uno más capaz para guías y "
+            "simulacros, y salta los que agotaron su cuota del día."
+        )
+        ai_form.addRow("Modelo", self.gemini_model_combo)
+
+        self.grounding_combo = QComboBox()
+        self.grounding_combo.addItem("Solo mis fuentes (recomendado)", "strict")
+        self.grounding_combo.addItem("Mis fuentes + conocimiento general señalado", "tutor")
+        self.grounding_combo.setCurrentIndex(
+            1 if getattr(settings, "ai_grounding", "strict") == "tutor" else 0
+        )
+        ai_form.addRow("Respuestas", self.grounding_combo)
 
         self.semantic_chk = QCheckBox(
-            "Activar embeddings semánticos híbridos (gemini-embedding-001 · 768d)"
+            "Búsqueda semántica (embeddings) además de la búsqueda por palabras"
         )
         self.semantic_chk.setChecked(settings.use_semantic_embeddings)
         ai_form.addRow("", self.semantic_chk)
@@ -214,9 +245,9 @@ class SettingsDialog(QDialog):
         self.open_aistudio_btn.clicked.connect(
             lambda: QDesktopServices.openUrl(QUrl(AI_STUDIO_APIKEY_URL))
         )
-        self.test_gemini_btn = QPushButton("Probar Conexión API")
+        self.test_gemini_btn = QPushButton("Probar conexión")
         self.test_gemini_btn.clicked.connect(self._test_gemini_api)
-        self.ai_guide_btn = QPushButton("❓ Guía paso a paso")
+        self.ai_guide_btn = QPushButton("Guía paso a paso")
         self.ai_guide_btn.clicked.connect(self._open_ai_guide)
         ai_row.addWidget(self.open_aistudio_btn)
         ai_row.addWidget(self.test_gemini_btn)
@@ -337,7 +368,7 @@ class SettingsDialog(QDialog):
         from zoom2txt.gui import style
 
         self.test_gemini_btn.setEnabled(True)
-        self.test_gemini_btn.setText("Probar Conexión API")
+        self.test_gemini_btn.setText("Probar conexión")
         color = style.SUCCESS if ok else style.ERROR
         self.gemini_test_status.setStyleSheet(f"color: {color}; font-weight: 600;")
         self.gemini_test_status.setText(message)
@@ -468,6 +499,8 @@ class SettingsDialog(QDialog):
                 gemini_api_key=self.gemini_key_edit.text().strip(),
                 gemini_model=self.gemini_model_combo.currentData(),
                 use_semantic_embeddings=self.semantic_chk.isChecked(),
+                ai_grounding=self.grounding_combo.currentData(),
+                scan_on_start=self.scan_on_start.isChecked(),
             )
             if self.pass_edit.text():
                 set_zoom_password(user, self.pass_edit.text())

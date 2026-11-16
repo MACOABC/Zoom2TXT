@@ -164,12 +164,44 @@ class WorkLedger:
         return sorted(rows, key=lambda r: (r["start_time"], r["id"]))
 
     def pending(self):
-        registry = Registry(self.settings)
+        done = Registry(self.settings).processed_keys()
         return [
             r
             for r in self.inventory()
-            if not registry.is_processed(r["course_id"], r["meeting_id"])
+            if recording_key(r["course_id"], r["meeting_id"]) not in done
         ]
+
+    def overview(self, now=None):
+        """Resumen para el panel de inicio: una sola pasada por el inventario."""
+        now = now or local_now()
+        daily = self.daily(now)
+        inventory = self.inventory()
+        done = Registry(self.settings).processed_keys()
+        pending = [
+            r for r in inventory if recording_key(r["course_id"], r["meeting_id"]) not in done
+        ]
+        monday = weeks.parse_start(self.settings.term_start)
+        current = weeks.current_week(monday, now.astimezone(LOCAL_ZONE).date()) if monday else None
+        by_week: dict[int, list[int]] = {}
+        if monday:
+            for row in inventory:
+                week = weeks.week_of_str(monday, row["start_time"])
+                if week:
+                    slot = by_week.setdefault(week, [0, 0])
+                    slot[0] += 1
+                    if recording_key(row["course_id"], row["meeting_id"]) not in done:
+                        slot[1] += 1
+        courses = self.courses()
+        return {
+            "daily": daily,
+            "inventory": len(inventory),
+            "pending": pending,
+            "transcribed": len(inventory) - len(pending),
+            "current_week": current,
+            "by_week": {week: tuple(values) for week, values in by_week.items()},
+            "courses": courses,
+            "partial": any(c.get("error") for c in courses),
+        }
 
     def set_expected(self, course_id, count):
         if not isinstance(count, int) or not 0 <= count <= 14:
@@ -183,7 +215,7 @@ class WorkLedger:
         if not monday:
             return []
         inventory = self.inventory()
-        registry = Registry(self.settings)
+        done = Registry(self.settings).processed_keys()
         result = []
         for course in self.courses():
             plan = self.store.get("weekly_plan", course["id"])
@@ -201,7 +233,9 @@ class WorkLedger:
                     and lo.isoformat() <= r["start_time"][:10] <= hi.isoformat()
                 ]
                 pending = [
-                    r for r in rows if not registry.is_processed(r["course_id"], r["meeting_id"])
+                    r
+                    for r in rows
+                    if recording_key(r["course_id"], r["meeting_id"]) not in done
                 ]
                 closed = hi < today
                 fresh = (

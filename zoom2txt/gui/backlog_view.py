@@ -66,6 +66,15 @@ class BacklogView(QWidget):
         self.weekly_table.horizontalHeaderItem(3).setToolTip(
             "Sesiones semanales que configuraste para este curso"
         )
+        from zoom2txt.gui import widgets
+
+        for table, column in ((self.pending_table, 3), (self.weekly_table, 4)):
+            table.setMouseTracking(True)
+            table.setItemDelegateForColumn(column, widgets.StatusDelegate(table))
+        self.pending_table.horizontalHeader().setSectionResizeMode(
+            3, QHeaderView.ResizeMode.Fixed
+        )
+        self.pending_table.setColumnWidth(3, 230)
         tabs.addTab(self.pending_table, "Por transcribir")
         tabs.addTab(self.weekly_table, "Revisión semanal")
         layout.addWidget(tabs, 1)

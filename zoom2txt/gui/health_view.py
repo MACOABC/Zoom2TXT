@@ -26,7 +26,7 @@ from PySide6.QtWidgets import (
 )
 
 from zoom2txt import APP_NAME, __version__
-from zoom2txt.gui import lucide, style
+from zoom2txt.gui import style
 from zoom2txt.health import HealthResult, full_health
 from zoom2txt.security import redact
 from zoom2txt.storage import atomic_write
@@ -82,7 +82,9 @@ class HealthView(QWidget):
         summary_layout.addLayout(copy, 1)
         self.refresh_button = QPushButton("Comprobar ahora")
         self.refresh_button.setProperty("variant", "primary")
-        self.refresh_button.setIcon(lucide.icon("refresh-cw", style.ON_ACCENT, 16))
+        from zoom2txt.gui import widgets as _widgets
+
+        _widgets.set_icon(self.refresh_button, "refresh-cw", "ON_ACCENT", 16)
         self.refresh_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.refresh_button.setAccessibleName("Comprobar el estado de Zoom2TXT")
         self.refresh_button.clicked.connect(self.refresh)
@@ -106,6 +108,11 @@ class HealthView(QWidget):
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.setAccessibleName("Comprobaciones del estado de Zoom2TXT")
         style.configure_table(self.table)
+        from zoom2txt.gui import widgets
+
+        self.table.setMouseTracking(True)
+        self.table.setItemDelegateForColumn(1, widgets.StatusDelegate(self.table))
+        self.table.horizontalHeader().setMinimumSectionSize(150)
         self.table.setMinimumHeight(style.HEADER_HEIGHT + 8 * style.ROW_HEIGHT + 2)
         layout.addWidget(self.table, 1)
 
@@ -118,11 +125,11 @@ class HealthView(QWidget):
         note.setWordWrap(True)
         footer.addWidget(note, 1)
         self.export_button = QPushButton("Guardar informe")
-        self.export_button.setIcon(lucide.icon("download", style.MUTED, 16))
+        _widgets.set_icon(self.export_button, "download", "MUTED", 16)
         self.export_button.setEnabled(False)
         self.export_button.clicked.connect(self._export)
         self.settings_button = QPushButton("Abrir ajustes")
-        self.settings_button.setIcon(lucide.icon("settings", style.MUTED, 16))
+        _widgets.set_icon(self.settings_button, "settings", "MUTED", 16)
         self.settings_button.clicked.connect(self.settings_requested.emit)
         footer.addWidget(self.export_button)
         footer.addWidget(self.settings_button)

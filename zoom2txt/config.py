@@ -16,6 +16,7 @@ from urllib.parse import urlparse
 from platformdirs import user_data_dir
 
 from zoom2txt import APP_NAME
+from zoom2txt.ai_models import AUTO_MODEL, CATALOG_IDS, is_valid_model_id
 from zoom2txt.storage import atomic_write
 
 DATA_DIR = Path(
@@ -36,14 +37,24 @@ DEFAULT_MATERIALS_DIR = Path.home() / APP_NAME / "Material"
 DEFAULT_BLACKBOARD_URL = ""
 
 AI_STUDIO_APIKEY_URL = "https://aistudio.google.com/apikey"
-DEFAULT_GEMINI_MODEL = "gemini-3.5-flash"
-FREE_TIER_MODELS = (
-    "gemini-3.5-flash",
-    "gemini-3.5-flash-lite",
-    "gemini-3.8-flash",
-    "gemini-2.5-flash",
-)
+# «auto» deja que la app elija el modelo según la tarea y la cuota disponible.
+DEFAULT_GEMINI_MODEL = AUTO_MODEL
+FREE_TIER_MODELS = CATALOG_IDS
 EMBEDDING_MODEL = "gemini-embedding-001"
+AI_GROUNDING_MODES = ("strict", "tutor")
+# Identificadores que Google ya no sirve; una preferencia guardada con ellos se ignora.
+RETIRED_MODELS = frozenset(
+    {
+        "gemini-3.5-flash",
+        "gemini-3.7-flash",
+        "gemini-2.5-flash",
+        "gemini-2.5-pro",
+        "gemini-2.0-flash",
+        "gemini-2.0-flash-lite",
+        "gemini-1.5-flash",
+        "gemini-1.5-pro",
+    }
+)
 
 
 def save_gemini_api_key(api_key: str) -> None:
@@ -79,46 +90,23 @@ def load_gemini_api_key() -> str:
 
 
 def test_gemini_connection(api_key: str, model: str | None = None) -> tuple[bool, str]:
-    """Prueba la conexión con Google AI Studio usando el SDK oficial google-genai."""
+    """Prueba la clave con una solicitud mínima y actualiza el catálogo de modelos."""
     cleaned = str(api_key or "").strip()
     if not cleaned:
         return False, "Ingresa una GEMINI_API_KEY obtenida en Google AI Studio (aistudio.google.com/apikey)."
     try:
-        from google import genai
-        from google.genai import types
+        from zoom2txt.ai_gateway import GeminiGateway
+        from zoom2txt.ai_models import ModelRouter
+        from zoom2txt.storage import StateStore
     except ImportError:
         return False, "El paquete oficial 'google-genai' no está instalado en este entorno."
+    try:
+        router = ModelRouter(StateStore())
+    except Exception as exc:  # noqa: BLE001 — la prueba nunca debe romper Ajustes
+        from zoom2txt.security import redact
 
-    client = genai.Client(api_key=cleaned)
-    candidates = [model] if model else []
-    for m in FREE_TIER_MODELS:
-        if m not in candidates:
-            candidates.append(m)
-
-    last_err = ""
-    for candidate in candidates:
-        if not candidate:
-            continue
-        try:
-            resp = client.models.generate_content(
-                model=candidate,
-                contents="Responde únicamente: OK",
-                config=types.GenerateContentConfig(
-                    temperature=0.0,
-                    max_output_tokens=10,
-                ),
-            )
-            text = getattr(resp, "text", "") or "OK"
-            return True, f"Conexión verificada con {candidate} ({text.strip()[:30]})."
-        except Exception as exc:  # noqa: BLE001
-            from zoom2txt.security import redact
-
-            msg = redact(str(exc))
-            last_err = msg
-            if "401" in msg or "API_KEY_INVALID" in msg or "API key not valid" in msg:
-                return False, "La clave API no es válida. Verifica que la copiaste completa desde Google AI Studio."
-            continue
-    return False, f"No se pudo conectar con Gemini API: {last_err}"
+        return False, "No se pudo abrir la base local: " + redact(exc)
+    return GeminiGateway(lambda: cleaned, router).test_connection(model)
 
 
 def clean_blackboard_url(value: str) -> str:
@@ -219,6 +207,11 @@ class Settings:
     gemini_api_key: str = ""
     gemini_model: str = DEFAULT_GEMINI_MODEL
     use_semantic_embeddings: bool = True
+    # 'strict' = solo mis fuentes · 'tutor' = fuentes + conocimiento general señalado
+    ai_grounding: str = "strict"
+    # Preferencias de interfaz
+    activity_collapsed: bool = False
+    scan_on_start: bool = False
 
     def save(self) -> None:
         DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -239,9 +232,14 @@ class Settings:
             "longest_per_day": self.longest_per_day,
             "youtube_private": False,
             "gemini_model": self.gemini_model
-            if self.gemini_model in FREE_TIER_MODELS
+            if is_valid_model_id(self.gemini_model)
             else DEFAULT_GEMINI_MODEL,
             "use_semantic_embeddings": bool(self.use_semantic_embeddings),
+            "ai_grounding": self.ai_grounding
+            if self.ai_grounding in AI_GROUNDING_MODES
+            else "strict",
+            "activity_collapsed": bool(self.activity_collapsed),
+            "scan_on_start": bool(self.scan_on_start),
             "schema_version": 2,
         }
         atomic_write(SETTINGS_FILE, json.dumps(payload, indent=2, ensure_ascii=False))
@@ -273,7 +271,13 @@ class Settings:
             if not validate_blackboard_url(base)[0]:
                 raise ValueError("Blackboard debe usar una dirección HTTPS válida.")
             raw_model = str(raw.get("gemini_model", DEFAULT_GEMINI_MODEL)).strip()
-            model = raw_model if raw_model in FREE_TIER_MODELS else DEFAULT_GEMINI_MODEL
+            # Los modelos retirados por Google vuelven a Automático sin intervención.
+            model = (
+                raw_model
+                if is_valid_model_id(raw_model) and raw_model not in RETIRED_MODELS
+                else DEFAULT_GEMINI_MODEL
+            )
+            grounding = str(raw.get("ai_grounding", "strict"))
             legacy_key = str(raw.get("gemini_api_key", "")).strip()
             if legacy_key:
                 save_gemini_api_key(legacy_key)
@@ -299,6 +303,9 @@ class Settings:
                 gemini_api_key=api_key,
                 gemini_model=model,
                 use_semantic_embeddings=flag("use_semantic_embeddings", True),
+                ai_grounding=grounding if grounding in AI_GROUNDING_MODES else "strict",
+                activity_collapsed=flag("activity_collapsed"),
+                scan_on_start=flag("scan_on_start"),
             )
         except (OSError, ValueError, TypeError):
             return cls(gemini_api_key=load_gemini_api_key())

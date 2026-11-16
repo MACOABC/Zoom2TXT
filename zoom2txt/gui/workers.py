@@ -12,6 +12,7 @@ from PySide6.QtCore import QThread, Signal
 from zoom2txt.blackboard import weeks as wk
 from zoom2txt.config import CLIENT_SECRETS_FILE, TOKEN_FILE, Settings
 from zoom2txt.core.pipeline import run_pipeline
+from zoom2txt.progress import ProgressLog
 from zoom2txt.transcription.youtube_engine import AuthorizationRequired
 from zoom2txt.workflow import DAILY_LIMIT, DailyLimitReached, WorkLedger
 
@@ -19,6 +20,7 @@ from zoom2txt.workflow import DAILY_LIMIT, DailyLimitReached, WorkLedger
 class PipelineWorker(QThread):
     log = Signal(str)
     stage = Signal(int)  # índice del paso que inicia (0-3)
+    progress = Signal(int, float, str)  # (paso, fracción 0-1 o -1, detalle)
     done = Signal(str, str)  # (ruta del .txt final o "", id del video o "")
     failed = Signal(str)  # mensaje de error legible
 
@@ -47,7 +49,7 @@ class PipelineWorker(QThread):
                 self._password,
                 self._nombre,
                 self._settings,
-                self.log.emit,
+                ProgressLog(self.log.emit, self.progress.emit),
                 self.stage.emit,
                 self.cancel_event,
             )
@@ -337,6 +339,8 @@ class QueueWorker(QThread):
 
     log = Signal(str)
     stage = Signal(int)
+    progress = Signal(int, float, str)  # (paso, fracción 0-1 o -1, detalle)
+    round_wait = Signal(int, int)  # (segundos para la próxima revisión, clases en espera)
     item_started = Signal(int, str)
     item_finished = Signal(int, str)
     item_waiting = Signal(int)
@@ -382,13 +386,19 @@ class QueueWorker(QThread):
         step = 0.5
         total = float(self.poll_interval)
         spent = 0.0
+        announced = -1
         while spent < total:
+            remaining = int(total - spent + 0.999)
+            if remaining != announced:
+                announced = remaining
+                self.round_wait.emit(remaining, getattr(self, "_pending_count", 0))
             if self.cancel_event.wait(min(step, total - spent)):
                 return True
             if self._wakeup_event.is_set() or self._has_incoming():
                 self._wakeup_event.clear()
                 return False
             spent += step
+        self.round_wait.emit(0, getattr(self, "_pending_count", 0))
         return False
 
     def run(self):
@@ -414,7 +424,7 @@ class QueueWorker(QThread):
                 "",
                 item["name"],
                 self._settings,
-                self.log.emit,
+                ProgressLog(self.log.emit, self.progress.emit),
                 self.stage.emit,
                 self.cancel_event,
                 Path(cookies) if cookies else None,
@@ -557,6 +567,7 @@ class QueueWorker(QThread):
                     f"[i] {len(pending)} transcripciones en proceso. Próxima revisión en {self.poll_interval} segundos; puedes pausar o agregar más clases."
                 )
                 self._wakeup_event.clear()
+                self._pending_count = len(pending)
                 if self._wait_poll_interval():
                     break
         for i, _ in pending:
@@ -766,6 +777,7 @@ class MaterialDownloadWorker(QThread):
 class RecoveryWorker(QThread):
     log = Signal(str)
     stage = Signal(int)
+    progress = Signal(int, float, str)
     result = Signal(str)
 
     def __init__(self, settings, job=None, parent=None):
@@ -810,7 +822,7 @@ class RecoveryWorker(QThread):
                 password,
                 self.job.get("display_name", self.job["name"]),
                 self.settings,
-                self.log.emit,
+                ProgressLog(self.log.emit, self.progress.emit),
                 self.stage.emit,
                 self.cancel_event,
                 cookies if cookies.exists() else None,
@@ -885,6 +897,9 @@ class RagSyncWorker(QThread):
     def cancel(self) -> None:
         self.cancel_event.set()
 
+    def _cancelled(self) -> bool:
+        return self.cancel_event.is_set() or self.isInterruptionRequested()
+
     def run(self) -> None:
         from zoom2txt.rag_engine import sync_existing_materials, sync_existing_transcripts
         from zoom2txt.security import redact
@@ -893,14 +908,18 @@ class RagSyncWorker(QThread):
             t_stats = sync_existing_transcripts(
                 self._settings,
                 progress_callback=lambda i, t, name: self.progress.emit(i, max(1, t), name),
+                cancelled=self._cancelled,
             )
-            if self.cancel_event.is_set() or self.isInterruptionRequested():
+            if self._cancelled():
                 return
             m_stats = sync_existing_materials(
                 self._settings,
                 course_id=self._course_id,
                 progress_callback=lambda i, t, name: self.progress.emit(i, max(1, t), name),
+                cancelled=self._cancelled,
             )
+            if self._cancelled():
+                return
             self.done.emit(
                 {
                     "transcripts_indexed": t_stats["indexed"],
@@ -970,12 +989,14 @@ class RagIngestFilesWorker(QThread):
 
 
 class RagQueryWorker(QThread):
-    """Ejecuta la consulta RAG híbrida + generación Gemini en un QThread sin congelar la GUI."""
+    """Consulta al asistente en segundo plano, con respuesta en streaming."""
 
     chunk_received = Signal(str)
+    reset = Signal()  # el modelo cambió a mitad de respuesta: descartar lo parcial
     done = Signal(object)  # RAGResponse
     rate_limited = Signal(int, str)  # (retry_after_seconds, message)
     failed = Signal(str)
+    cancelled = Signal()
 
     def __init__(
         self,
@@ -987,6 +1008,12 @@ class RagQueryWorker(QThread):
         preferred_model: str | None = None,
         stream: bool = False,
         parent=None,
+        *,
+        history: list[dict] | None = None,
+        grounding: str = "strict",
+        context_mode: str = "auto",
+        task: str = "chat",
+        instruction: str = "",
     ):
         super().__init__(parent)
         self._engine = engine
@@ -996,6 +1023,11 @@ class RagQueryWorker(QThread):
         self._active_source_ids = active_source_ids
         self._preferred_model = preferred_model
         self._stream = stream
+        self._history = history
+        self._grounding = grounding
+        self._context_mode = context_mode
+        self._task = task
+        self._instruction = instruction
         self.cancel_event = threading.Event()
 
     def cancel(self) -> None:
@@ -1013,11 +1045,79 @@ class RagQueryWorker(QThread):
                 active_source_ids=self._active_source_ids,
                 preferred_model=self._preferred_model,
                 on_chunk=self.chunk_received.emit if self._stream else None,
+                on_reset=self.reset.emit if self._stream else None,
+                history=self._history,
+                grounding=self._grounding,
+                context_mode=self._context_mode,
+                cancel=self.cancel_event,
+                task=self._task,
+                instruction=self._instruction,
             )
-            if not (self.cancel_event.is_set() or self.isInterruptionRequested()):
+            if self.cancel_event.is_set() or self.isInterruptionRequested():
+                self.cancelled.emit()
+            else:
                 self.done.emit(resp)
+        except InterruptedError:
+            self.cancelled.emit()
         except RateLimitExceededError as exc:
             self.rate_limited.emit(exc.retry_after, redact(str(exc)))
+        except Exception as exc:  # noqa: BLE001
+            self.failed.emit(redact(str(exc)))
+
+
+class StudyWorker(QThread):
+    """Genera tarjetas o un simulacro con las fuentes marcadas."""
+
+    done = Signal(object)  # study.StudyResult
+    rate_limited = Signal(int, str)
+    failed = Signal(str)
+    cancelled = Signal()
+
+    def __init__(self, engine, tool_key: str, parent=None, **scope):
+        super().__init__(parent)
+        self._engine = engine
+        self._tool_key = tool_key
+        self._scope = scope
+        self.cancel_event = threading.Event()
+
+    def cancel(self) -> None:
+        self.cancel_event.set()
+
+    def run(self) -> None:
+        from zoom2txt.rag_engine import RateLimitExceededError
+        from zoom2txt.security import redact
+
+        try:
+            result = self._engine.generate_study(
+                self._tool_key, cancel=self.cancel_event, **self._scope
+            )
+            if self.cancel_event.is_set() or self.isInterruptionRequested():
+                self.cancelled.emit()
+            else:
+                self.done.emit(result)
+        except InterruptedError:
+            self.cancelled.emit()
+        except RateLimitExceededError as exc:
+            self.rate_limited.emit(exc.retry_after, redact(str(exc)))
+        except Exception as exc:  # noqa: BLE001
+            self.failed.emit(redact(str(exc)))
+
+
+class ModelRefreshWorker(QThread):
+    """Pregunta a Google qué modelos admite la clave del usuario."""
+
+    done = Signal(object)  # list[str]
+    failed = Signal(str)
+
+    def __init__(self, engine, parent=None):
+        super().__init__(parent)
+        self._engine = engine
+
+    def run(self) -> None:
+        from zoom2txt.security import redact
+
+        try:
+            self.done.emit(self._engine.gateway.refresh_models())
         except Exception as exc:  # noqa: BLE001
             self.failed.emit(redact(str(exc)))
 
