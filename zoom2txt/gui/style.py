@@ -7,11 +7,11 @@ apply_theme(app, mode) fija la paleta activa como variables de módulo
 
 PALETTES = {
     "dark": dict(
-        BG="#141a18",
-        SURFACE="#1b2420",
-        SURFACE_2="#202b26",
-        SURFACE_3="#293730",
-        BORDER="#34453c",
+        BG="#0f1412",
+        SURFACE="#161e1b",
+        SURFACE_2="#1c2722",
+        SURFACE_3="#24332c",
+        BORDER="#2c3e35",
         BORDER_HI="#70877b",
         TEXT="#eef4f0",
         MUTED="#b4c6bc",
@@ -25,7 +25,7 @@ PALETTES = {
         SUCCESS="#82dfb6",
         ERROR="#ffa69e",
         WARNING="#efc374",
-        CONSOLE_BG="#141a18",
+        CONSOLE_BG="#0f1412",
         CONSOLE_FG="#c5d6cd",
     ),
     "light": dict(
@@ -93,13 +93,27 @@ QLabel#accent {{ color: {g["LINK"]}; font-weight: 600; }}
 QFrame#card {{
     background-color: {g["SURFACE"]};
     border: 1px solid {g["BORDER"]};
-    border-radius: 8px;
+    border-radius: 12px;
 }}
 QFrame#workspace, QFrame#metric {{ background: transparent; border: none; }}
 QFrame#healthSummary {{
     background-color: {g["ACCENT_SUBTLE"]};
     border: 1px solid {g["BORDER"]};
-    border-radius: 10px;
+    border-radius: 12px;
+}}
+QFrame#activityDock {{
+    background-color: {g["SURFACE"]};
+    border: 1px solid {g["BORDER"]};
+    border-radius: 12px;
+    padding: 4px 10px;
+}}
+QLabel#dockBadge {{
+    background-color: {g["ACCENT_SUBTLE"]};
+    color: {g["LINK"]};
+    font-size: 11.5px;
+    font-weight: 700;
+    border-radius: 6px;
+    padding: 3px 8px;
 }}
 QLabel#healthHeadline {{ font-size: 19px; font-weight: 700; letter-spacing: -0.2px; }}
 
@@ -107,8 +121,8 @@ QLabel#healthHeadline {{ font-size: 19px; font-weight: 700; letter-spacing: -0.2
 QPushButton[variant="nav"] {{
     background-color: transparent;
     border: 2px solid transparent;
-    border-radius: 8px;
-    padding: 7px 10px;
+    border-radius: 10px;
+    padding: 8px 12px;
     text-align: left;
     font-weight: 500;
     color: {g["MUTED"]};
@@ -127,7 +141,7 @@ QPushButton[variant="nav"]:checked {{
 QLineEdit, QComboBox, QDateEdit, QSpinBox {{
     background-color: {g["SURFACE"]};
     border: 1px solid {g["BORDER_HI"]};
-    border-radius: 8px;
+    border-radius: 10px;
     padding: 9px 12px;
     selection-background-color: {g["ACCENT"]};
     selection-color: {g["ON_ACCENT"]};
@@ -175,7 +189,7 @@ QComboBox QAbstractItemView {{
 QPushButton {{
     background-color: {g["SURFACE"]};
     border: 1px solid {g["BORDER_HI"]};
-    border-radius: 8px;
+    border-radius: 10px;
     padding: 8px 16px;
     font-weight: 600;
 }}
@@ -196,6 +210,7 @@ QPushButton[variant="primary"] {{
     background-color: {g["ACCENT"]};
     border: 1px solid {g["ACCENT"]};
     color: {g["ON_ACCENT"]};
+    border-radius: 10px;
     padding: 9px 20px;
 }}
 QPushButton[variant="primary"]:hover {{
@@ -211,10 +226,22 @@ QPushButton[variant="primary"]:disabled {{
     border-color: {g["BORDER"]};
     color: {g["FAINT"]};
 }}
+QPushButton[variant="secondary"] {{
+    background-color: {g["SURFACE_2"]};
+    border: 1px solid {g["BORDER"]};
+    color: {g["TEXT"]};
+    border-radius: 10px;
+    padding: 7px 14px;
+}}
+QPushButton[variant="secondary"]:hover {{
+    background-color: {g["SURFACE_3"]};
+    border-color: {g["BORDER_HI"]};
+}}
 QPushButton[variant="danger"] {{
     background-color: transparent;
     border: 1px solid {g["ERROR"]};
     color: {g["ERROR"]};
+    border-radius: 10px;
 }}
 QPushButton[variant="danger"]:hover {{
     background-color: {g["SURFACE_3"]};

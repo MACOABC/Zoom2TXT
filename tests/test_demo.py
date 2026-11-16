@@ -26,7 +26,18 @@ class DemoTests(unittest.TestCase):
             self.assertEqual(window.table.rowCount(), 3)
             self.assertIn("datos sintéticos", window.scan_status.text())
             self.assertFalse(window.settings_btn.isEnabled())
+            # Verificar que la pestaña Asistente IA (índice 6) está habilitada en modo demo offline
+            self.assertTrue(window._nav_buttons[6].isEnabled())
+            window._navigate(6)
+            window.assistant._trigger_quick_prompt("Resume los temas principales")
+            messages = window.assistant.store.get_chat_messages(
+                window.assistant._current_session_id
+            )
+            self.assertEqual(len(messages), 2)
+            self.assertIn("DEMO-101", messages[1]["content"])
             window.close()
+            window.deleteLater()
+            base.APP.processEvents()
 
 
 if __name__ == "__main__":

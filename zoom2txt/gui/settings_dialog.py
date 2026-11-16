@@ -113,13 +113,15 @@ class SettingsDialog(QDialog):
             QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
         )
         self.visibility.setMinimumContentsLength(24)
-        self.visibility.addItem("Privado · consultas autorizadas con cuota API", True)
-        self.visibility.addItem("No listado · cualquier persona con enlace puede verlo", False)
-        self.visibility.setCurrentIndex(0 if settings.youtube_private else 1)
+        self.visibility.addItem("No listado (obligatorio)", False)
+        self.visibility.setEnabled(False)
+        self.visibility.setToolTip(
+            "Configuración fija: los videos se suben siempre como No listados y se eliminan automáticamente tras verificar el texto."
+        )
         form.addRow("Video en YouTube", self.visibility)
         privacy_note = QLabel(
-            "Se aplica a las nuevas subidas, no a videos existentes ni a sesiones interrumpidas. "
-            "Google puede restringir a Privado las subidas de proyectos API no verificados."
+            "Política estricta de privacidad: los videos se suben siempre como «No listado» "
+            "y se eliminan de YouTube de inmediato al obtener el texto verificado."
         )
         privacy_note.setWordWrap(True)
         privacy_note.setObjectName("muted")
@@ -172,6 +174,61 @@ class SettingsDialog(QDialog):
                 button.setProperty("variant", "danger")
             button.clicked.connect(callback)
             lay.addWidget(button)
+
+        ai_form = section("Asistente IA en la Nube (Gemini Free Tier · BYOK · 0% consumo en tu PC)")
+        from zoom2txt.config import AI_STUDIO_APIKEY_URL, FREE_TIER_MODELS
+
+        ai_help = QLabel(
+            "Guía rápida (1 minuto · Costo $0 sin tarjeta · 0% IA local en tu PC):\n"
+            "1) Abre aistudio.google.com/apikey con tu cuenta personal de Google (@gmail.com).\n"
+            "2) Pulsa «Create API key» y copia la clave (empieza con AIzaSy…).\n"
+            "3) Pégala abajo y pulsa «Probar Conexión API»."
+        )
+        ai_help.setObjectName("muted")
+        ai_help.setWordWrap(True)
+        ai_form.addRow(ai_help)
+
+        self.gemini_key_edit = QLineEdit(settings.gemini_api_key)
+        self.gemini_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self.gemini_key_edit.setPlaceholderText("AIzaSy… (clave gratuita de Google AI Studio)")
+        ai_form.addRow("GEMINI_API_KEY", self.gemini_key_edit)
+
+        self.gemini_model_combo = QComboBox()
+        for m in FREE_TIER_MODELS:
+            self.gemini_model_combo.addItem(m, m)
+        idx = self.gemini_model_combo.findData(settings.gemini_model)
+        self.gemini_model_combo.setCurrentIndex(max(0, idx))
+        ai_form.addRow("Modelo Free Tier", self.gemini_model_combo)
+
+        self.semantic_chk = QCheckBox(
+            "Activar embeddings semánticos híbridos (gemini-embedding-001 · 768d)"
+        )
+        self.semantic_chk.setChecked(settings.use_semantic_embeddings)
+        ai_form.addRow("", self.semantic_chk)
+
+        ai_actions = QWidget()
+        ai_row = QHBoxLayout(ai_actions)
+        ai_row.setContentsMargins(0, 0, 0, 0)
+        ai_row.setSpacing(8)
+        self.open_aistudio_btn = QPushButton("Obtener clave gratis…")
+        self.open_aistudio_btn.clicked.connect(
+            lambda: QDesktopServices.openUrl(QUrl(AI_STUDIO_APIKEY_URL))
+        )
+        self.test_gemini_btn = QPushButton("Probar Conexión API")
+        self.test_gemini_btn.clicked.connect(self._test_gemini_api)
+        self.ai_guide_btn = QPushButton("❓ Guía paso a paso")
+        self.ai_guide_btn.clicked.connect(self._open_ai_guide)
+        ai_row.addWidget(self.open_aistudio_btn)
+        ai_row.addWidget(self.test_gemini_btn)
+        ai_row.addWidget(self.ai_guide_btn)
+        ai_row.addStretch()
+        ai_form.addRow(ai_actions)
+        self.gemini_test_status = QLabel("")
+        self.gemini_test_status.setObjectName("muted")
+        self.gemini_test_status.setWordWrap(True)
+        self.gemini_test_status.hide()
+        ai_form.addRow(self.gemini_test_status)
+        self._gemini_test_worker = None
 
         backup_form = section("Respaldo y recuperación")
         backup_note = QLabel(
@@ -255,6 +312,36 @@ class SettingsDialog(QDialog):
     def _open_data_dir(self):
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(DATA_DIR)))
+
+    def _open_ai_guide(self):
+        from zoom2txt.gui.assistant_view import ApiKeyGuideDialog
+
+        ApiKeyGuideDialog(self).exec()
+
+    def _test_gemini_api(self):
+        from zoom2txt.gui.workers import GeminiConnectionTestWorker
+
+        if self._gemini_test_worker and self._gemini_test_worker.isRunning():
+            return
+        key = self.gemini_key_edit.text().strip()
+        model = self.gemini_model_combo.currentData()
+        self.test_gemini_btn.setEnabled(False)
+        self.test_gemini_btn.setText("Probando…")
+        self.gemini_test_status.setText("Conectando con Google AI Studio…")
+        self.gemini_test_status.show()
+        self._gemini_test_worker = GeminiConnectionTestWorker(key, model, self)
+        self._gemini_test_worker.finished_test.connect(self._on_gemini_test_finished)
+        self._gemini_test_worker.start()
+
+    def _on_gemini_test_finished(self, ok: bool, message: str):
+        from zoom2txt.gui import style
+
+        self.test_gemini_btn.setEnabled(True)
+        self.test_gemini_btn.setText("Probar Conexión API")
+        color = style.SUCCESS if ok else style.ERROR
+        self.gemini_test_status.setStyleSheet(f"color: {color}; font-weight: 600;")
+        self.gemini_test_status.setText(message)
+        self.gemini_test_status.show()
 
     def _export_history(self):
         from zoom2txt.backup import export_history
@@ -378,6 +465,9 @@ class SettingsDialog(QDialog):
                 youtube_private=self.visibility.currentData(),
                 auto_delete_youtube=True,
                 delete_local_video=self.del_video_chk.isChecked(),
+                gemini_api_key=self.gemini_key_edit.text().strip(),
+                gemini_model=self.gemini_model_combo.currentData(),
+                use_semantic_embeddings=self.semantic_chk.isChecked(),
             )
             if self.pass_edit.text():
                 set_zoom_password(user, self.pass_edit.text())

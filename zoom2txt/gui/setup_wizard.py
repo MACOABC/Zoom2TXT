@@ -33,6 +33,8 @@ from zoom2txt.config import (
     DATA_DIR,
     TOKEN_FILE,
     Settings,
+    clean_blackboard_url,
+    find_downloaded_client_secrets,
     validate_blackboard_url,
     validate_client_secrets,
 )
@@ -79,7 +81,23 @@ class WelcomePage(QWizardPage):
         pasos.setWordWrap(True)
         pasos.setStyleSheet(f"color: {style.MUTED};")
         lay.addWidget(pasos)
+
+        explore_box = QHBoxLayout()
+        self.explore_btn = QPushButton("🚀 Explorar la app primero (configurar luego)")
+        self.explore_btn.setToolTip(
+            "Te permite conocer la interfaz y probar el Asistente IA antes de conectar cuentas."
+        )
+        self.explore_btn.clicked.connect(self._explore)
+        explore_box.addWidget(self.explore_btn)
+        explore_box.addStretch()
+        lay.addLayout(explore_box)
+
         lay.addStretch()
+
+    def _explore(self) -> None:
+        wizard = self.wizard()
+        if hasattr(wizard, "skip_to_explore"):
+            wizard.skip_to_explore()
 
 
 class ZoomPage(QWizardPage):
@@ -139,13 +157,15 @@ class ZoomPage(QWizardPage):
 
     def validatePage(self) -> bool:
         user = self.user_edit.text().strip()
-        base = self.bb_edit.text().strip().rstrip("/")
+        raw_base = self.bb_edit.text().strip().rstrip("/")
+        base = clean_blackboard_url(raw_base) or raw_base
         valid, message = validate_blackboard_url(base)
         if not valid:
             from PySide6.QtWidgets import QMessageBox
 
             QMessageBox.warning(self, "Dirección de Blackboard inválida", message)
             return False
+        self.bb_edit.setText(base)
         if user != self._settings.zoom_user or base != self._settings.blackboard_url:
             BB_COOKIES_FILE.unlink(missing_ok=True)
         self._settings.zoom_user = user
@@ -243,10 +263,21 @@ class GoogleCloudPage(QWizardPage):
         navigation.addWidget(self.prev_step)
         navigation.addWidget(self.next_step)
         lay.addLayout(navigation)
-        self.pick_btn = QPushButton("Seleccionar archivo JSON")
+
+        file_actions = QHBoxLayout()
+        file_actions.setSpacing(8)
+        self.auto_detect_btn = QPushButton("✨ Detectar archivo en Descargas")
+        self.auto_detect_btn.setProperty("variant", "week")
+        self.auto_detect_btn.setToolTip("Busca automáticamente el archivo client_secret... descargado en tu carpeta de Descargas.")
+        self.auto_detect_btn.clicked.connect(self._try_auto_detect)
+
+        self.pick_btn = QPushButton("Seleccionar archivo JSON manual…")
         self.pick_btn.setProperty("variant", "primary")
         self.pick_btn.clicked.connect(self._pick_file)
-        lay.addWidget(self.pick_btn)
+        file_actions.addWidget(self.auto_detect_btn)
+        file_actions.addWidget(self.pick_btn)
+        lay.addLayout(file_actions)
+
         self.status = QLabel()
         self.status.setWordWrap(True)
         lay.addWidget(self.status)
@@ -263,8 +294,32 @@ class GoogleCloudPage(QWizardPage):
         self.step_label.setText(f"Paso {index + 1} de {len(STEPS)} · {STEPS[index][0]}")
         self.prev_step.setEnabled(index > 0)
         self.next_step.setEnabled(index < len(STEPS) - 1)
-        self.pick_btn.setVisible(index == len(STEPS) - 1)
-        self.open_step_btn.setVisible(index != len(STEPS) - 1)
+        is_last = index == len(STEPS) - 1
+        self.pick_btn.setVisible(is_last)
+        self.auto_detect_btn.setVisible(is_last)
+        self.open_step_btn.setVisible(not is_last)
+        if is_last and not self._valid:
+            self._try_auto_detect(silent=True)
+
+    def _try_auto_detect(self, silent: bool = False) -> None:
+        found = find_downloaded_client_secrets()
+        if not found:
+            if not silent:
+                self._set_status_error("No se encontró ningún archivo 'client_secret*.json' en tu carpeta Descargas. Descárgalo desde Google Cloud o selecciónalo manualmente.")
+            return
+        ok, error = validate_client_secrets(found)
+        if ok:
+            try:
+                candidate = DATA_DIR / "client_secrets.pending.json"
+                atomic_write(candidate, found.read_bytes())
+                self._valid = True
+                self._set_status_ok(f"Detectado automáticamente en Descargas: {found.name}")
+                self.completeChanged.emit()
+            except OSError:
+                if not silent:
+                    self._set_status_error("No se pudo preparar la credencial detectada.")
+        elif not silent:
+            self._set_status_error(f"Se detectó {found.name} pero es inválido: {error}")
 
     def _open_step(self):
         from zoom2txt.gui.cloud_setup import STEPS, console_url
@@ -311,8 +366,9 @@ class GoogleCloudPage(QWizardPage):
 
 
 class OAuthPage(QWizardPage):
-    def __init__(self):
+    def __init__(self, settings: Settings | None = None):
         super().__init__()
+        self._settings = settings
         self._worker: OAuthWorker | None = None
         lay = QVBoxLayout(self)
         lay.addLayout(
@@ -337,13 +393,40 @@ class OAuthPage(QWizardPage):
         )
         help_text.setWordWrap(True)
         lay.addWidget(help_text)
+
+        aud_row = QHBoxLayout()
+        aud_row.setSpacing(8)
         self.audience_btn = QPushButton("Abrir Usuarios de prueba de mi proyecto")
         self.audience_btn.clicked.connect(self._open_audience)
-        lay.addWidget(self.audience_btn)
+        aud_row.addWidget(self.audience_btn)
+
+        self.copy_user_btn = QPushButton("📋 Copiar mi correo")
+        self.copy_user_btn.setToolTip("Copia tu correo al portapapeles para pegarlo directamente en Google Cloud.")
+        self.copy_user_btn.clicked.connect(self._copy_user_email)
+        aud_row.addWidget(self.copy_user_btn)
+        aud_row.addStretch()
+        lay.addLayout(aud_row)
+
         self.status = QLabel()
         self.status.setWordWrap(True)
         lay.addWidget(self.status)
         lay.addStretch()
+
+    def _copy_user_email(self) -> None:
+        from PySide6.QtGui import QGuiApplication
+
+        email = (self._settings.zoom_user if self._settings else "").strip()
+        if not email:
+            w = self.wizard()
+            if w and hasattr(w, "_settings"):
+                email = (w._settings.zoom_user or "").strip()
+        if email:
+            QGuiApplication.clipboard().setText(email)
+            self.status.setText(f"✓  Correo '{email}' copiado al portapapeles. Pégalo en Google Cloud.")
+            self.status.setStyleSheet(f"color: {style.SUCCESS};")
+        else:
+            self.status.setText("Aún no has ingresado un correo de usuario.")
+            self.status.setStyleSheet(f"color: {style.MUTED};")
 
     def _open_audience(self):
         from zoom2txt.gui.cloud_setup import configured_project, console_url
@@ -490,8 +573,12 @@ class SetupWizard(QWizard):
         self.addPage(WelcomePage())
         self.addPage(ZoomPage(settings))
         self.addPage(GoogleCloudPage())
-        self.addPage(OAuthPage())
+        self.addPage(OAuthPage(settings))
         self.addPage(FoldersPage(settings))
+
+    def skip_to_explore(self) -> None:
+        # Permite explorar la aplicación sin forzar wizard_done
+        super().accept()
 
     def accept(self) -> None:
         self._settings.wizard_done = True

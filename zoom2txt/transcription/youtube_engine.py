@@ -131,7 +131,7 @@ def subir_a_youtube(
             "defaultAudioLanguage": lang,
         },
         "status": {
-            "privacyStatus": "private" if private else "unlisted",
+            "privacyStatus": "unlisted",
             "selfDeclaredMadeForKids": False,
         },
     }

@@ -37,6 +37,10 @@ Más documentación: https://github.com/MACOABC/Zoom2TXT
 
 NOVEDADES DE 2.8.0
 -----------------
+- Asistente IA en la Nube (Estilo NotebookLM): consulta tus transcripciones y
+  materiales de curso (PDF, PPTX, DOCX, TXT) con citas verificables por curso
+  o entre todos tus cursos, usando tu propia clave gratuita de Google AI Studio
+  (Costo $0, sin tarjeta y 0% consumo de IA local en tu PC).
 - En Clases, pulsa Actualizar cursos, elige un curso y pulsa Buscar clases
   nuevas. Solo se revisan las grabaciones pendientes del curso elegido.
 - Todos los cursos permite buscar conjuntamente. Puedes combinar el curso

@@ -142,6 +142,7 @@ def main() -> int:
             "gui_created": True,
             "backlog_created": window.stack.currentWidget() is window.backlog,
             "health_created": window.health.table.columnCount() == 3,
+            "assistant_created": hasattr(window, "assistant") and window.assistant is not None,
             "daily_budget": ledger.daily()["remaining"] == 6,
             "js_runtime": runtime_ok,
         }
@@ -155,6 +156,7 @@ def main() -> int:
                 "gui_created",
                 "backlog_created",
                 "health_created",
+                "assistant_created",
                 "daily_budget",
                 "js_runtime",
             )

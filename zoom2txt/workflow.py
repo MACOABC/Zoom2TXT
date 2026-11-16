@@ -99,6 +99,7 @@ class WorkLedger:
             scanned_at=stamp,
             error="",
         )
+        self.store.upsert_course(course_id, name)
 
     def course_error(self, course_id, name, message):
         self.store.put(
@@ -108,6 +109,7 @@ class WorkLedger:
             term_start=self.settings.term_start,
             error=str(message),
         )
+        self.store.upsert_course(course_id, name)
 
     def remember_courses(self, courses):
         self.store.put(
@@ -117,6 +119,9 @@ class WorkLedger:
             choices=[{"id": c["id"], "name": c["name"]} for c in courses],
             term_start=self.settings.term_start,
         )
+        for c in courses:
+            if c.get("id") and c.get("name"):
+                self.store.upsert_course(c["id"], c["name"])
 
     def course_choices(self):
         meta = self.store.get("meta", "current_courses")

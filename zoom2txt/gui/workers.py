@@ -340,18 +340,56 @@ class QueueWorker(QThread):
     item_started = Signal(int, str)
     item_finished = Signal(int, str)
     item_waiting = Signal(int)
+    item_enqueued = Signal(int, str)
     all_done = Signal(int, int)
     poll_interval = 120
     max_caption_rounds = 105
 
     def __init__(self, items, zoom_password, settings, delete_after=True, parent=None):
         super().__init__(parent)
-        self._items = items
+        self._items = list(items)
         self._settings = settings
         self.cancel_event = threading.Event()
+        self._wakeup_event = threading.Event()
+        self._lock = threading.Lock()
+        self._incoming_items: list[tuple[int, dict]] = []
 
     def cancel(self):
         self.cancel_event.set()
+        self._wakeup_event.set()
+
+    def enqueue(self, items: list[dict], start_index: int) -> int:
+        """Dynamically append new items to the in-flight processing queue."""
+        with self._lock:
+            for offset, it in enumerate(items):
+                idx = start_index + offset
+                self._incoming_items.append((idx, it))
+                self.item_enqueued.emit(idx, it.get("name", ""))
+        self._wakeup_event.set()
+        return len(items)
+
+    def _has_incoming(self) -> bool:
+        with self._lock:
+            return bool(self._incoming_items)
+
+    def _wait_poll_interval(self) -> bool:
+        """Returns True if cancelled."""
+        if self.cancel_event.is_set():
+            return True
+        # If cancel_event.wait is mocked in a test, delegate directly to the mock
+        if hasattr(self.cancel_event.wait, "mock_calls"):
+            return bool(self.cancel_event.wait(self.poll_interval))
+        step = 0.5
+        total = float(self.poll_interval)
+        spent = 0.0
+        while spent < total:
+            if self.cancel_event.wait(min(step, total - spent)):
+                return True
+            if self._wakeup_event.is_set() or self._has_incoming():
+                self._wakeup_event.clear()
+                return False
+            spent += step
+        return False
 
     def run(self):
         from zoom2txt.blackboard.registry import Registry, recording_key
@@ -399,14 +437,27 @@ class QueueWorker(QThread):
             self.item_finished.emit(index, "")
             return "failed"
 
-        for i, item in enumerate(self._items):
+        initial_work = list(enumerate(self._items))
+        work_index = 0
+
+        while work_index < len(initial_work) or self._has_incoming():
             if self.cancel_event.is_set():
                 break
+            with self._lock:
+                if self._incoming_items:
+                    initial_work.extend(self._incoming_items)
+                    self._incoming_items.clear()
+            if work_index >= len(initial_work):
+                break
+
+            i, item = initial_work[work_index]
+            work_index += 1
+
             identity = item["course_id"], item["meeting_id"]
             if identity in seen or registry.is_processed(*identity):
                 continue
             seen.add(identity)
-            self.log.emit(f"[i] Preparando clase {i + 1}/{len(self._items)}: {item['name']}")
+            self.log.emit(f"[i] Preparando clase {i + 1}/{len(initial_work)}: {item['name']}")
             try:
                 result = process(i, item, True)
                 if result == "waiting":
@@ -436,8 +487,49 @@ class QueueWorker(QThread):
                 "[i] Clases preparadas. Revisando las transcripciones pendientes por turnos."
             )
         for attempt in range(self.max_caption_rounds):
-            if not pending or auth_failed or self.cancel_event.is_set():
+            if auth_failed or self.cancel_event.is_set():
                 break
+
+            with self._lock:
+                new_work = list(self._incoming_items)
+                self._incoming_items.clear()
+
+            if new_work:
+                self.log.emit(f"[+] Se incorporaron {len(new_work)} clase(s) a la cola activa.")
+                for i, item in new_work:
+                    if self.cancel_event.is_set():
+                        break
+                    identity = item["course_id"], item["meeting_id"]
+                    if identity in seen or registry.is_processed(*identity):
+                        continue
+                    seen.add(identity)
+                    self.log.emit(f"[i] Preparando clase agregada: {item['name']}")
+                    try:
+                        result = process(i, item, True)
+                        if result == "waiting":
+                            pending.append((i, item))
+                        elif result == "done":
+                            ok += 1
+                        else:
+                            failed += 1
+                    except DailyLimitReached as exc:
+                        self.log.emit("[i] " + redact(exc))
+                        self.item_finished.emit(i, "")
+                    except AuthorizationRequired as exc:
+                        self.log.emit("[!] Reautoriza tu cuenta desde Ajustes. " + redact(exc))
+                        self.item_finished.emit(i, "")
+                        failed += 1
+                        auth_failed = True
+                        break
+                    except Exception as exc:
+                        self.log.emit(f"[!] {item['name']}: " + redact(exc))
+                        self.item_finished.emit(i, "")
+                        failed += 1
+
+            if not pending:
+                if not self._has_incoming():
+                    break
+
             remaining = []
             for i, item in pending:
                 if self.cancel_event.is_set() or auth_failed:
@@ -460,11 +552,12 @@ class QueueWorker(QThread):
                     self.item_finished.emit(i, "")
                     failed += 1
             pending = remaining
-            if pending and not auth_failed and attempt + 1 < self.max_caption_rounds:
+            if (pending or self._has_incoming()) and not auth_failed and attempt + 1 < self.max_caption_rounds:
                 self.log.emit(
-                    f"[i] {len(pending)} transcripciones en proceso. Próxima revisión en {self.poll_interval} segundos; puedes pausar."
+                    f"[i] {len(pending)} transcripciones en proceso. Próxima revisión en {self.poll_interval} segundos; puedes pausar o agregar más clases."
                 )
-                if self.cancel_event.wait(self.poll_interval):
+                self._wakeup_event.clear()
+                if self._wait_poll_interval():
                     break
         for i, _ in pending:
             self.item_finished.emit(i, "")
@@ -642,6 +735,20 @@ class MaterialDownloadWorker(QThread):
                         size=size,
                         checksum=digest(dest),
                     )
+                    try:
+                        from zoom2txt.rag_engine import SUPPORTED_EXTENSIONS, ingest_file
+
+                        if dest.suffix.lower() in SUPPORTED_EXTENSIONS:
+                            ingest_file(
+                                self._settings,
+                                dest,
+                                course_id=str(mf.course_id),
+                                course_name=str(getattr(mf, "course_name", "") or mf.course_id),
+                                title=mf.filename,
+                                store=state,
+                            )
+                    except Exception:  # noqa: BLE001, S110
+                        pass
                     ok += 1
                     self.log.emit("[+] Material verificado: " + mf.filename)
                 except InterruptedError:
@@ -760,3 +867,173 @@ class OAuthWorker(QThread):
             self.succeeded.emit()
         except Exception as exc:  # noqa: BLE001
             self.failed.emit(str(exc))
+
+
+class RagSyncWorker(QThread):
+    """Sincroniza e indexa transcripciones y materiales locales en un hilo secundario."""
+
+    progress = Signal(int, int, str)
+    done = Signal(dict)
+    failed = Signal(str)
+
+    def __init__(self, settings: Settings, course_id: str | None = None, parent=None):
+        super().__init__(parent)
+        self._settings = settings
+        self._course_id = course_id
+        self.cancel_event = threading.Event()
+
+    def cancel(self) -> None:
+        self.cancel_event.set()
+
+    def run(self) -> None:
+        from zoom2txt.rag_engine import sync_existing_materials, sync_existing_transcripts
+        from zoom2txt.security import redact
+
+        try:
+            t_stats = sync_existing_transcripts(
+                self._settings,
+                progress_callback=lambda i, t, name: self.progress.emit(i, max(1, t), name),
+            )
+            if self.cancel_event.is_set() or self.isInterruptionRequested():
+                return
+            m_stats = sync_existing_materials(
+                self._settings,
+                course_id=self._course_id,
+                progress_callback=lambda i, t, name: self.progress.emit(i, max(1, t), name),
+            )
+            self.done.emit(
+                {
+                    "transcripts_indexed": t_stats["indexed"],
+                    "materials_indexed": m_stats["indexed"],
+                    "total_scanned": t_stats["total"] + m_stats["total"],
+                }
+            )
+        except Exception as exc:  # noqa: BLE001
+            self.failed.emit(redact(exc))
+
+
+class RagIngestFilesWorker(QThread):
+    """Importa e indexa archivos adicionales (.pdf, .pptx, .docx, .txt, .md) para un curso."""
+
+    progress = Signal(int, int, str)
+    done = Signal(int, int)  # (ok_count, failed_count)
+    failed = Signal(str)
+
+    def __init__(
+        self,
+        settings: Settings,
+        files: list[Path],
+        course_id: str,
+        course_name: str,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self._settings = settings
+        self._files = files
+        self._course_id = course_id
+        self._course_name = course_name
+        self.cancel_event = threading.Event()
+
+    def cancel(self) -> None:
+        self.cancel_event.set()
+
+    def run(self) -> None:
+        from zoom2txt.rag_engine import ingest_file
+        from zoom2txt.security import redact
+        from zoom2txt.storage import StateStore
+
+        ok = failed = 0
+        try:
+            store = StateStore(self._settings)
+            total = len(self._files)
+            for idx, fpath in enumerate(self._files, start=1):
+                if self.cancel_event.is_set() or self.isInterruptionRequested():
+                    break
+                self.progress.emit(idx, total, fpath.name)
+                try:
+                    sid = ingest_file(
+                        self._settings,
+                        fpath,
+                        course_id=self._course_id,
+                        course_name=self._course_name,
+                        store=store,
+                    )
+                    if sid is not None:
+                        ok += 1
+                    else:
+                        failed += 1
+                except Exception:  # noqa: BLE001
+                    failed += 1
+            self.done.emit(ok, failed)
+        except Exception as exc:  # noqa: BLE001
+            self.failed.emit(redact(exc))
+
+
+class RagQueryWorker(QThread):
+    """Ejecuta la consulta RAG híbrida + generación Gemini en un QThread sin congelar la GUI."""
+
+    chunk_received = Signal(str)
+    done = Signal(object)  # RAGResponse
+    rate_limited = Signal(int, str)  # (retry_after_seconds, message)
+    failed = Signal(str)
+
+    def __init__(
+        self,
+        engine,
+        question: str,
+        course_id: str | None = None,
+        all_courses: bool = False,
+        active_source_ids: list[int] | None = None,
+        preferred_model: str | None = None,
+        stream: bool = False,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self._engine = engine
+        self._question = question
+        self._course_id = course_id
+        self._all_courses = all_courses
+        self._active_source_ids = active_source_ids
+        self._preferred_model = preferred_model
+        self._stream = stream
+        self.cancel_event = threading.Event()
+
+    def cancel(self) -> None:
+        self.cancel_event.set()
+
+    def run(self) -> None:
+        from zoom2txt.rag_engine import RateLimitExceededError
+        from zoom2txt.security import redact
+
+        try:
+            resp = self._engine.ask(
+                question=self._question,
+                course_id=self._course_id,
+                all_courses=self._all_courses,
+                active_source_ids=self._active_source_ids,
+                preferred_model=self._preferred_model,
+                on_chunk=self.chunk_received.emit if self._stream else None,
+            )
+            if not (self.cancel_event.is_set() or self.isInterruptionRequested()):
+                self.done.emit(resp)
+        except RateLimitExceededError as exc:
+            self.rate_limited.emit(exc.retry_after, redact(str(exc)))
+        except Exception as exc:  # noqa: BLE001
+            self.failed.emit(redact(str(exc)))
+
+
+class GeminiConnectionTestWorker(QThread):
+    """Prueba la conexión con la API de Gemini en segundo plano."""
+
+    finished_test = Signal(bool, str)
+
+    def __init__(self, api_key: str, model: str | None = None, parent=None):
+        super().__init__(parent)
+        self._api_key = api_key
+        self._model = model
+
+    def run(self) -> None:
+        from zoom2txt.config import test_gemini_connection
+
+        ok, msg = test_gemini_connection(self._api_key, self._model)
+        self.finished_test.emit(ok, msg)

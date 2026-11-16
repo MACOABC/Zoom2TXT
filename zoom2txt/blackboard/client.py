@@ -622,11 +622,13 @@ class BlackboardClient:
         if response.status_code != 200:
             raise BlackboardError(f"No se pudo abrir el documento (HTTP {response.status_code}).")
         data = response.json()
-        if not isinstance(data, dict) or not isinstance(data.get("body"), str):
-            raise BlackboardError(
-                "Blackboard no devolvió el contenido del documento; no se puede comprobar si tiene archivos."
-            )
-        return data["body"]
+        if not isinstance(data, dict):
+            return ""
+        body = data.get("body")
+        if body is None or not isinstance(body, str):
+            # Documento o contenedor Ultra sin texto de cuerpo HTML (ej. enlaces a Zoom o carpetas vacías)
+            return ""
+        return body
 
     def list_course_materials(self, course_id: str, course_name: str) -> list[MaterialFile]:
         """Todos los archivos descargables del curso, con su ruta
@@ -678,6 +680,8 @@ class BlackboardClient:
                         self.coverage.append(f"{title}: {parsed.external_links} enlaces externos")
                     if parsed.has_text and not parsed.files:
                         self.coverage.append(f"{title}: documento de texto sin adjuntos")
+                    if not parsed.files and not parsed.has_text:
+                        self.coverage.append(f"{title}: recurso sin archivos adjuntos")
                 elif handler in ATTACH_HANDLERS:
                     attachments = self._content_attachments(course_id, it)
                 else:

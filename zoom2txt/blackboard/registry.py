@@ -133,6 +133,14 @@ class Registry:
             checksum=digest(path),
             note="",
         )
+        from zoom2txt.rag_engine import auto_ingest_transcript
+
+        auto_ingest_transcript(
+            self.settings,
+            path,
+            course_id=str(course_id),
+            title=str(name),
+        )
 
     def restore(self, key):
         self.store.put("recording", key, status="pending", note="Restaurada por el usuario")

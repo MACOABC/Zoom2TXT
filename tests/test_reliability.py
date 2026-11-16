@@ -47,6 +47,7 @@ class ReliabilityTests(unittest.TestCase):
                 "engines",
                 "database",
                 "drive",
+                "ai_assistant",
             },
         )
 

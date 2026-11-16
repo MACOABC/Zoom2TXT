@@ -11,6 +11,7 @@ from PySide6.QtCore import QDate, Qt, QTimer, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QApplication,
     QCheckBox,
     QComboBox,
     QFrame,
@@ -223,6 +224,7 @@ class MainWindow(QMainWindow):
             ("book-open", "Biblioteca"),
             ("calendar", "Pendientes"),
             ("activity", "Estado"),
+            ("sparkles", "Asistente IA"),
         ]
         self._nav_buttons: list[QPushButton] = []
         for i, (icon_name, label) in enumerate(nav_items):
@@ -248,7 +250,20 @@ class MainWindow(QMainWindow):
         self.settings_btn.setIcon(lucide.icon("settings", style.MUTED, 18))
         self.settings_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.settings_btn.clicked.connect(self._open_settings)
-        side.addWidget(self.settings_btn)
+
+        footer_row = QHBoxLayout()
+        footer_row.setContentsMargins(0, 0, 0, 0)
+        footer_row.setSpacing(6)
+        footer_row.addWidget(self.settings_btn, 1)
+
+        self.theme_toggle_btn = QPushButton("🌙" if style.current_mode == "dark" else "☀️")
+        self.theme_toggle_btn.setToolTip("Cambiar modo claro / oscuro")
+        self.theme_toggle_btn.setFixedWidth(40)
+        self.theme_toggle_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.theme_toggle_btn.clicked.connect(self._toggle_theme)
+        footer_row.addWidget(self.theme_toggle_btn)
+        side.addLayout(footer_row)
+
         version = QLabel(f"v{__version__} · credenciales solo en esta PC")
         version.setObjectName("faint")
         version.setWordWrap(True)
@@ -301,8 +316,32 @@ class MainWindow(QMainWindow):
         self.health = HealthView(self.settings)
         self.health.settings_requested.connect(self._open_settings)
         self.stack.addWidget(self.health)
+        from zoom2txt.gui.assistant_view import AssistantView
+
+        self.assistant = AssistantView(self.settings, self)
+        self.stack.addWidget(self.assistant)
         card_lay.addWidget(self.stack)
         outer.addWidget(card)
+
+        # Dock de actividad: resumen rápido y estado global en vivo
+        self.activity_dock = QFrame()
+        self.activity_dock.setObjectName("activityDock")
+        dock_lay = QHBoxLayout(self.activity_dock)
+        dock_lay.setContentsMargins(14, 8, 14, 8)
+        dock_lay.setSpacing(12)
+
+        self.dock_badge = QLabel("🟢 En espera")
+        self.dock_badge.setObjectName("dockBadge")
+        dock_lay.addWidget(self.dock_badge)
+
+        self.dock_text = QLabel("Listo · Selecciona tus clases para procesar")
+        self.dock_text.setObjectName("muted")
+        dock_lay.addWidget(self.dock_text, 1)
+
+        self.dock_material_status = QLabel("")
+        self.dock_material_status.setObjectName("faint")
+        dock_lay.addWidget(self.dock_material_status)
+        outer.addWidget(self.activity_dock)
 
         # Cuerpo: pasos + consola (se oculta en la pestaña Biblioteca)
         self.body_widget = QWidget()
@@ -337,14 +376,24 @@ class MainWindow(QMainWindow):
         stages_card.setFixedWidth(230)
 
         console_box = QVBoxLayout()
+        console_hdr = QHBoxLayout()
         console_title = QLabel("Actividad")
         console_title.setObjectName("h2")
+        console_hdr.addWidget(console_title)
+        console_hdr.addStretch()
+
+        self.toggle_console_btn = QPushButton("▴ Ocultar registro")
+        self.toggle_console_btn.setProperty("variant", "secondary")
+        self.toggle_console_btn.setToolTip("Muestra u oculta el registro técnico detallado.")
+        self.toggle_console_btn.clicked.connect(self._toggle_console)
+        console_hdr.addWidget(self.toggle_console_btn)
+        console_box.addLayout(console_hdr)
+
         self.console = QPlainTextEdit()
         self.console.setObjectName("console")
         self.console.setReadOnly(True)
         self.console.setMaximumBlockCount(1500)
-        self.console.setMinimumHeight(144)
-        console_box.addWidget(console_title)
+        self.console.setMinimumHeight(120)
         console_box.addWidget(self.console, 1)
 
         body.addWidget(stages_card)
@@ -518,6 +567,15 @@ class MainWindow(QMainWindow):
         self.process_btn.setProperty("variant", "primary")
         self.process_btn.clicked.connect(self._process_queue)
         self.process_btn.hide()
+
+        self.append_queue_btn = QPushButton("➕ Agregar a la cola activa")
+        self.append_queue_btn.setToolTip(
+            "Agrega las clases recién seleccionadas a la cola de transcripción en curso sin detenerla."
+        )
+        self.append_queue_btn.setProperty("variant", "primary")
+        self.append_queue_btn.clicked.connect(self._append_to_queue)
+        self.append_queue_btn.hide()
+
         self.cancel_queue_btn = QPushButton("Cancelar")
         self.cancel_queue_btn.setProperty("variant", "danger")
         self.cancel_queue_btn.clicked.connect(self._cancel_queue)
@@ -526,6 +584,7 @@ class MainWindow(QMainWindow):
         bottom.addWidget(self.skip_all_btn)
         bottom.addStretch()
         bottom.addWidget(self.process_btn)
+        bottom.addWidget(self.append_queue_btn)
         bottom.addWidget(self.cancel_queue_btn)
         lay.addLayout(bottom)
         return tab
@@ -649,6 +708,7 @@ class MainWindow(QMainWindow):
                 "Tu biblioteca",
                 "Lo que falta",
                 "Estado de la app",
+                "Asistente IA (Cursos)",
             ][index]
         )
         self.page_subtitle.setText(
@@ -659,6 +719,7 @@ class MainWindow(QMainWindow):
                 "Tus transcripciones en disco, organizadas para volver a ellas.",
                 "Tu cola continúa mañana. Revisa también las semanas que necesitan atención.",
                 "Comprueba el entorno antes de procesar y guarda un informe seguro si necesitas ayuda.",
+                "Consulta tus transcripciones y materiales locales con citas exactas [Curso | Fuente].",
             ][index]
         )
         self.stack.setCurrentIndex(index)
@@ -680,13 +741,13 @@ class MainWindow(QMainWindow):
         is_library = self.stack.widget(index) is self.library
         is_backlog = self.stack.widget(index) is self.backlog
         is_health = self.stack.widget(index) is self.health
+        is_assistant = self.stack.widget(index) is getattr(self, "assistant", None)
+        full_height = is_library or is_backlog or is_health or is_assistant
         # Las vistas de consulta ocupan toda la altura; el trabajo muestra pasos+consola.
-        self.body_widget.setVisible(not (is_library or is_backlog or is_health))
+        self.body_widget.setVisible(not full_height)
         self._card.setSizePolicy(
             self._card.sizePolicy().horizontalPolicy(),
-            QtSizePolicy.Expanding
-            if is_library or is_backlog or is_health
-            else QtSizePolicy.Preferred,
+            QtSizePolicy.Expanding if full_height else QtSizePolicy.Preferred,
         )
         if is_library:
             self.library.refresh()
@@ -694,9 +755,11 @@ class MainWindow(QMainWindow):
             self.backlog.refresh()
         if is_health:
             self.health.refresh()
+        if is_assistant:
+            self.assistant.refresh()
 
     def _search_backlog(self):
-        if self._busy():
+        if self._discovery_busy():
             return
         self._navigate(0)
         self.weeks_chk.setChecked(False)
@@ -778,7 +841,7 @@ class MainWindow(QMainWindow):
         self._load_saved_work()
 
     def _refresh_courses(self):
-        if self._closing or self._busy():
+        if self._closing or self._discovery_busy():
             return
         self.course_controls.setEnabled(False)
         self.scan_btn.setEnabled(False)
@@ -1040,15 +1103,49 @@ class MainWindow(QMainWindow):
                 return True
         return False
 
+    def _transcription_busy(self) -> bool:
+        for w in (self.worker, self.queue_worker, self.recovery_worker):
+            if w and w.isRunning():
+                return True
+        return False
+
+    def _material_busy(self) -> bool:
+        for w in (self.mat_scan_worker, self.mat_dl_worker):
+            if w and w.isRunning():
+                return True
+        return False
+
+    def _discovery_busy(self) -> bool:
+        for w in (self.course_worker, self.scan_worker):
+            if w and w.isRunning():
+                return True
+        return False
+
+    def _toggle_theme(self) -> None:
+        new_mode = "light" if style.current_mode == "dark" else "dark"
+        self.settings.theme = new_mode
+        self.settings.save()
+        app = QApplication.instance()
+        if app:
+            style.apply_theme(app, new_mode)
+            self.theme_toggle_btn.setText("🌙" if new_mode == "dark" else "☀️")
+
+    def _toggle_console(self) -> None:
+        visible = not self.console.isVisible()
+        self.console.setVisible(visible)
+        self.toggle_console_btn.setText("▴ Ocultar registro" if visible else "▾ Mostrar registro técnico")
+
     # ── Material de cursos ────────────────────────────────────────
     def _scan_material(self) -> None:
         if self._closing:
             return
-        if self._busy():
+        if self._material_busy():
             return
         self.mat_scan_btn.setEnabled(False)
         self.mat_dl_btn.hide()
         self.mat_status.setText("Revisando el material de tus cursos…")
+        if hasattr(self, "dock_material_status"):
+            self.dock_material_status.setText("Revisando materiales…")
         self.mat_scan_worker = MaterialScanWorker(self.settings, self)
         self.mat_scan_worker.log.connect(self._log)
         self.mat_scan_worker.needs_login.connect(self._on_mat_needs_login)
@@ -1131,19 +1228,26 @@ class MainWindow(QMainWindow):
         QMessageBox.critical(self, "Error en material", error)
 
     def _download_material(self) -> None:
-        if self._busy() or not getattr(self, "_material_missing", None):
+        if self._material_busy() or not getattr(self, "_material_missing", None):
             return
         self.mat_dl_btn.hide()
         self.mat_cancel_btn.show()
         self.mat_scan_btn.setEnabled(False)
+        if hasattr(self, "dock_material_status"):
+            self.dock_material_status.setText(f"📥 Descargando {len(self._material_missing)} archivos…")
         self.mat_dl_worker = MaterialDownloadWorker(self.settings, self._material_missing, self)
         self.mat_dl_worker.log.connect(self._log)
         self.mat_dl_worker.progress.connect(
-            lambda i, t: self.mat_status.setText(f"Descargando… {i}/{t}")
+            lambda i, t: self._on_mat_progress(i, t)
         )
         self.mat_dl_worker.finished_all.connect(self._on_material_done)
         self.mat_dl_worker.finished.connect(self._scan_material)
         self.mat_dl_worker.start()
+
+    def _on_mat_progress(self, current: int, total: int) -> None:
+        self.mat_status.setText(f"Descargando… {current}/{total}")
+        if hasattr(self, "dock_material_status"):
+            self.dock_material_status.setText(f"📥 Materiales {current}/{total}")
 
     def _cancel_material(self) -> None:
         if self.mat_dl_worker:
@@ -1161,6 +1265,8 @@ class MainWindow(QMainWindow):
             else " Revisa el resultado de la nueva búsqueda."
         )
         self.mat_status.setText(msg)
+        if hasattr(self, "dock_material_status"):
+            self.dock_material_status.setText(f"✓ {ok} materiales listos" if not failed else f"⚠️ {ok} listos, {failed} err.")
         self._log(f"[+] {msg}")
         self._notify("Material descargado", msg)
 
@@ -1173,7 +1279,7 @@ class MainWindow(QMainWindow):
     def _scan(self) -> None:
         if self._closing:
             return
-        if self._busy():
+        if self._discovery_busy():
             return
         self.scan_btn.setEnabled(False)
         self._pending_backlog = 0
@@ -1460,7 +1566,15 @@ class MainWindow(QMainWindow):
         self._refresh_backlog_notice()
 
     def _process_queue(self) -> None:
-        if self._busy():
+        if self.queue_worker and self.queue_worker.isRunning():
+            self._append_to_queue()
+            return
+        if self._transcription_busy():
+            QMessageBox.information(
+                self,
+                "Transcripción en curso",
+                "Ya hay una tarea de transcripción o recuperación en curso. Espera a que termine.",
+            )
             return
         ranges = self._selected_week_ranges()
         if self.weeks_chk.isChecked() and not ranges:
@@ -1500,20 +1614,69 @@ class MainWindow(QMainWindow):
         self.settings.save()
         self._launch_queue(selected, password or "")
 
+    def _append_to_queue(self) -> None:
+        if not (self.queue_worker and self.queue_worker.isRunning()):
+            return
+        ranges = self._selected_week_ranges()
+        to_add: list[dict] = []
+        for row in range(self.table.rowCount()):
+            chk = self.table.item(row, 0)
+            if not chk or chk.checkState() != Qt.CheckState.Checked:
+                continue
+            if not (chk.flags() & Qt.ItemFlag.ItemIsEnabled):
+                # Ya fue agregada previamente a la cola
+                continue
+            item = dict(self._scan_items[row])
+            course_id = self.course_combo.currentData()
+            if course_id is not None and item["course_id"] != course_id:
+                continue
+            if ranges and not any(lo <= item["start_time"][:10] <= hi for lo, hi in ranges):
+                continue
+            nombre = self.table.item(row, 2).text().strip()
+            nombre = re.sub(r'[<>:"/\\|?*]', "_", nombre).strip(". ")
+            item["name"] = nombre or item["name"]
+            to_add.append(item)
+            chk.setFlags(chk.flags() & ~Qt.ItemFlag.ItemIsEnabled & ~Qt.ItemFlag.ItemIsUserCheckable)
+            self._set_class_status(row, "En espera…")
+
+        if not to_add:
+            QMessageBox.information(
+                self,
+                "Sin nuevas clases seleccionadas",
+                "Marca una o más clases adicionales en la tabla para incorporarlas a la cola activa.",
+            )
+            return
+
+        start_index = len(self._queue_items)
+        self._queue_items.extend(to_add)
+        self._queue_total += len(to_add)
+        self.queue_worker.enqueue(to_add, start_index=start_index)
+        self._log(f"[+] {len(to_add)} clase(s) agregadas dinámicamente a la cola activa en segundo plano.")
+        self.scan_status.setText(f"{len(to_add)} clase(s) agregadas a la cola activa.")
+        if hasattr(self, "dock_text"):
+            self.dock_text.setText(f"Cola ampliada (+{len(to_add)} clases). Total en tanda: {self._queue_total}")
+
     def _launch_queue(self, selected: list, password: str) -> None:
         """Arranca la cola seleccionada desde la interfaz de escritorio."""
         self._queue_total = len(selected)
-        self._queue_items = selected
+        self._queue_items = list(selected)
         self._active_queue_index = None
-        self.table.setEnabled(False)
+        for row in range(self.table.rowCount()):
+            chk = self.table.item(row, 0)
+            if chk and chk.checkState() == Qt.CheckState.Checked:
+                chk.setFlags(chk.flags() & ~Qt.ItemFlag.ItemIsEnabled & ~Qt.ItemFlag.ItemIsUserCheckable)
         self._reset_stages()
         self.open_btn.hide()
         self.process_btn.hide()
         self.skip_all_btn.hide()
+        self.append_queue_btn.show()
         self.cancel_queue_btn.show()
         self.scan_btn.setEnabled(False)
-        self.settings_btn.setEnabled(False)
         self.course_controls.setEnabled(False)
+
+        if hasattr(self, "dock_badge"):
+            self.dock_badge.setText("⚡ Transcribiendo")
+            self.dock_text.setText(f"Iniciando tanda ({len(selected)} clases)…")
 
         self.queue_worker = QueueWorker(
             selected, password, self.settings, self.delete_chk.isChecked(), self
@@ -1532,6 +1695,9 @@ class MainWindow(QMainWindow):
         if row is not None:
             self._set_class_status(row, "Comprobando…")
         self.queue_label.setText(f"Clase {index + 1}: {name}")
+        if hasattr(self, "dock_badge"):
+            self.dock_badge.setText("⚡ Transcribiendo")
+            self.dock_text.setText(f"Clase {index + 1}/{self._queue_total}: {name}")
         self._reset_stages()
 
     def _cancel_queue(self) -> None:
@@ -1546,12 +1712,19 @@ class MainWindow(QMainWindow):
             f"{ok} completadas · {pending_count} pendientes · {failed} con problemas"
         )
         self._active_queue_index = None
+        for row in range(self.table.rowCount()):
+            chk = self.table.item(row, 0)
+            if chk:
+                chk.setFlags(chk.flags() | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsUserCheckable)
         self.table.setEnabled(True)
+        self.append_queue_btn.hide()
         self.cancel_queue_btn.hide()
         self.cancel_queue_btn.setEnabled(True)
         self.scan_btn.setEnabled(True)
-        self.settings_btn.setEnabled(True)
         self.course_controls.setEnabled(True)
+        if hasattr(self, "dock_badge"):
+            self.dock_badge.setText("✓ Tanda lista")
+            self.dock_text.setText(f"{ok} completadas · {pending_count} pendientes · {failed} con problemas")
         self._log("")
         self._log("============================================")
         self._log(
@@ -1644,19 +1817,20 @@ class MainWindow(QMainWindow):
         self.scan_btn.setEnabled(not running)
 
     def _on_stage(self, index: int) -> None:
+        stage_names = [
+            "Preparando video",
+            "Preparando texto…",
+            "Texto en proceso…",
+            "Verificando y limpiando",
+        ]
         active = getattr(self, "_active_queue_index", None)
         if active is not None:
             row = self._queue_table_row(active)
-            if row is not None:
-                self._set_class_status(
-                    row,
-                    [
-                        "Preparando video",
-                        "Preparando texto…",
-                        "Texto en proceso…",
-                        "Verificando y limpiando",
-                    ][index],
-                )
+            if row is not None and 0 <= index < len(stage_names):
+                self._set_class_status(row, stage_names[index])
+        if hasattr(self, "dock_text") and 0 <= index < len(stage_names):
+            active_info = f"Clase {active + 1}: " if active is not None else ""
+            self.dock_text.setText(f"{active_info}{stage_names[index]}")
         self._current_stage = index
         for i, row in enumerate(self.stage_rows):
             row.set_state("done" if i < index else "active" if i == index else "pending")
@@ -1707,6 +1881,9 @@ class MainWindow(QMainWindow):
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
 
     def closeEvent(self, event):
+        assistant = getattr(self, "assistant", None)
+        if assistant is not None and assistant.is_busy():
+            assistant.cancel_all()
         health_worker = getattr(getattr(self, "health", None), "_worker", None)
         if health_worker and health_worker.isRunning() and not self._busy():
             self._closing = True

@@ -81,14 +81,15 @@ def read_private_json(path: Path, migrate=True):
 def redact(message) -> str:
     text = str(message)
     text = re.sub(r"bot\d+:[A-Za-z0-9_-]+", "bot[OCULTO]", text)
+    text = re.sub(r"\bAIza[A-Za-z0-9_-]{20,}\b", "AIza[OCULTO]", text)
     text = re.sub(r"\b[A-Za-z0-9_.+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b", "[correo]", text)
     text = re.sub(
-        r'(?i)((?:access_token|refresh_token|id_token|client_secret|password|oauth_signature|authorization|cookie|scid|xsrf)["\s:=]+)[^\s,;<>]+',
+        r'(?i)((?:access_token|refresh_token|id_token|client_secret|password|oauth_signature|authorization|cookie|scid|xsrf|gemini_api_key|api_key|x-goog-api-key)["\s:=]+)[^\s,;<>]+',
         r"\1[OCULTO]",
         text,
     )
     text = re.sub(
-        r"([?&](?:pwd|passcode|token|signature|auth|scid|upload_id)=)[^&\s]+",
+        r"([?&](?:pwd|passcode|token|signature|auth|scid|upload_id|key)=)[^&\s]+",
         r"\1[OCULTO]",
         text,
         flags=re.I,

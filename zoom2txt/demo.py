@@ -6,6 +6,7 @@ from PySide6.QtCore import Qt, QTimer
 
 from zoom2txt.config import DATA_DIR, Settings
 from zoom2txt.gui.main_window import MainWindow
+from zoom2txt.rag_engine import RAGResponse, ingest_file
 from zoom2txt.storage import atomic_write
 
 DEMO_COURSES = (
@@ -69,11 +70,86 @@ class DemoMainWindow(MainWindow):
         self.history_btn.setEnabled(False)
         self.history_btn.setToolTip("La demostración no conserva historial.")
         for index, button in enumerate(self._nav_buttons):
-            if index not in (0, 3):
+            if index not in (0, 3, 6):
                 button.setEnabled(False)
                 button.setToolTip(
                     "Esta sección requiere una cuenta real y está desactivada en la demostración."
                 )
+        self._setup_demo_assistant()
+
+    def _setup_demo_assistant(self) -> None:
+        demo_txt = (
+            self.settings.transcripts_dir
+            / "ArquitecturaDeSoftware_Semana02_2026-09-01_Para_NotebookLM.txt"
+        )
+        atomic_write(
+            demo_txt,
+            (
+                "ARQUITECTURA DE SOFTWARE / DEMO-101\n\n"
+                "En esta clase de Semana 2 revisamos los patrones de arquitectura limpia (Clean Architecture), "
+                "la regla de dependencia hacia el dominio y el desacoplamiento de bases de datos mediante puertos "
+                "y adaptadores. El examen parcial evaluará las Semanas 1 a 7 el 15 de octubre.\n"
+            ),
+        )
+        ingest_file(
+            self.settings,
+            demo_txt,
+            course_id="demo-course-1",
+            course_name=DEMO_COURSES[0],
+            source_type="transcript",
+        )
+        demo_mat = self.settings.materials_dir / "Silabo_Arquitectura_Semana01.txt"
+        atomic_write(
+            demo_mat,
+            (
+                "Sílabo oficial de Arquitectura de Software (DEMO-101).\n"
+                "Conceptos clave: SOLID, Arquitectura Hexagonal, CQRS y pruebas unitarias.\n"
+                "Entrega del proyecto parcial: Semana 7.\n"
+            ),
+        )
+        ingest_file(
+            self.settings,
+            demo_mat,
+            course_id="demo-course-1",
+            course_name=DEMO_COURSES[0],
+            source_type="txt",
+        )
+        self.assistant._initial_sync_done = True
+        self.assistant.demo_responder = self._demo_rag_answer
+        self.assistant.refresh()
+
+    def _demo_rag_answer(self, question: str, active_ids: list[int]) -> RAGResponse:
+        chunks, _ = self.assistant.engine.retrieve(
+            question,
+            course_id=self.assistant.current_course_id(),
+            all_courses=self.assistant.is_all_courses_mode(),
+            active_source_ids=active_ids,
+            use_embeddings=False,
+        )
+        citations = [
+            {
+                "course_name": c.course_name,
+                "source_title": c.source_title,
+                "source_type": c.source_type,
+                "chunk_index": c.chunk_index,
+            }
+            for c in chunks
+        ]
+        answer = (
+            "### Respuesta de Demostración (100% Offline)\n\n"
+            "Según las fuentes indexadas del curso:\n"
+            "- Se estudió **Clean Architecture**, la regla de dependencia hacia el dominio y el patrón de "
+            "puertos y adaptadores `[Curso: ARQUITECTURA DE SOFTWARE / DEMO-101 | Fuente: ArquitecturaDeSoftware_Semana02_2026-09-01]`.\n"
+            "- Los conceptos clave incluyen **SOLID, Arquitectura Hexagonal y CQRS**, y la entrega del proyecto "
+            "parcial está programada para la **Semana 7** (examen parcial el **15 de octubre**) "
+            "`[Curso: ARQUITECTURA DE SOFTWARE / DEMO-101 | Fuente: Silabo_Arquitectura_Semana01]`."
+        )
+        return RAGResponse(
+            answer=answer,
+            citations=citations,
+            model_used="demo-offline-cloud-preview",
+            chunks=chunks,
+        )
 
     def _setup_tray(self) -> None:
         self.tray = None

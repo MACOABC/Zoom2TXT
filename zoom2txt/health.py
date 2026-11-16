@@ -9,7 +9,7 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
 
-from zoom2txt.config import BB_COOKIES_FILE, Settings, credentials_status
+from zoom2txt.config import BB_COOKIES_FILE, Settings, credentials_status, load_gemini_api_key
 from zoom2txt.download.zoom_downloader import yt_dlp_path
 from zoom2txt.processes import run_process
 from zoom2txt.security import redact
@@ -163,6 +163,28 @@ def quick_health(settings: Settings) -> list[HealthResult]:
                 "Es opcional; el TXT principal seguirá guardándose localmente.",
             )
         )
+
+    gemini_key = (settings.gemini_api_key or "").strip() or load_gemini_api_key()
+    if gemini_key:
+        results.append(
+            HealthResult(
+                "ai_assistant",
+                "Asistente IA (Gemini Cloud)",
+                "ok",
+                f"Clave configurada ({settings.gemini_model})",
+                "100% Cloud Free Tier (BYOK) · 0% consumo de IA local en tu PC.",
+            )
+        )
+    else:
+        results.append(
+            HealthResult(
+                "ai_assistant",
+                "Asistente IA (Gemini Cloud)",
+                "warning",
+                "Opcional · Sin GEMINI_API_KEY",
+                "Configura tu clave gratuita en Asistente IA o Ajustes (Costo $0, sin tarjeta).",
+            )
+        )
     return results
 
 
@@ -277,6 +299,7 @@ def full_health(settings: Settings, cancelled=lambda: False) -> list[HealthResul
         "disk",
         "database",
         "drive",
+        "ai_assistant",
     ]
     return [by_key[key] for key in order if key in by_key]
 

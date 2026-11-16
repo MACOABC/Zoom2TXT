@@ -23,7 +23,8 @@ Zoom2TXT convierte un flujo académico repetitivo en una aplicación de escritor
 - Trabajos recuperables: una interrupción no obliga a descargar ni subir nuevamente lo ya confirmado.
 - Detección de duplicados, selección del MP4 sobre audio separado y organización por curso/semana.
 - Estados explícitos para descarga, subida, procesamiento de subtítulos y verificación del TXT.
-- Una suite de **181 pruebas automatizadas** con HTTP real bloqueado durante los tests.
+- **Asistente IA de Estudio en la Nube (Estilo NotebookLM):** motor RAG local basado en SQLite FTS5 (BM25) + Gemini Free Tier en la nube (BYOK con `google-genai`, **Costo $0**, sin tarjeta de crédito y **0% de ejecución de IA local en la PC del usuario**). Responde únicamente a partir de las transcripciones y materiales del curso (`.pdf`, `.pptx`, `.docx`, `.txt`, `.md`) con citas verificables `[Curso | Fuente]`.
+- Una suite de **pruebas automatizadas** con HTTP real bloqueado durante los tests.
 
 ## Demo segura, sin credenciales
 
@@ -54,7 +55,7 @@ flowchart LR
     E --> F[YouTube no listado o privado]
     F --> G[Subtítulos automáticos]
     G --> H[TXT verificado]
-    H --> I[Biblioteca / NotebookLM]
+    H --> I[Biblioteca / Asistente IA Cloud]
 ```
 
 La tanda prepara primero todas las grabaciones admitidas sin esperar a los subtítulos de cada una. Luego consulta las transcripciones pendientes por turnos: una clase lenta no bloquea las demás. Pausar conserva los IDs confirmados y evita repetir subidas.
@@ -74,7 +75,8 @@ La arquitectura y sus límites de confianza están descritos en [docs/ARCHITECTU
 | Transcripción | YouTube Data API v3 y subtítulos automáticos |
 | Autorización | OAuth 2.0 por usuario |
 | Secretos | Credential Manager / Secret Service / KWallet mediante `keyring` |
-| Persistencia | SQLite, escrituras atómicas y `platformdirs` |
+| Persistencia | SQLite (con índice léxico FTS5 BM25), escrituras atómicas y `platformdirs` |
+| Asistente IA (RAG) | Google AI Studio Free Tier (`google-genai`, `gemini-2.5-flash` / `gemini-2.5-flash-lite` + `gemini-embedding-001`), 100% Cloud BYOK ($0 costo, 0% IA local) |
 | Calidad | `unittest`, Ruff, pip-audit, Gitleaks y GitHub Actions |
 | Distribución | PyInstaller |
 

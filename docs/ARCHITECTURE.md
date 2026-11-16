@@ -13,10 +13,18 @@ flowchart TB
     Pipeline --> Downloader[Descargador yt-dlp]
     Pipeline --> YouTube[YouTube Data API]
     Pipeline --> Captions[Extractor de subtítulos]
-    Pipeline --> Store[(SQLite + estado cifrado)]
+    Pipeline --> Store[(SQLite + FTS5 + estado cifrado)]
     Captions --> Files[TXT verificado]
+    Files --> RAG[Motor RAG Híbrido + Gemini Cloud Free Tier]
+    Store --> RAG
     Store --> Keyring[Keyring del sistema]
 ```
+
+### Asistente IA en la Nube (Motor RAG `zoom2txt/rag_engine.py`)
+
+- **0% IA Local y $0 Costo (BYOK):** No ejecuta modelos pesados en la PC del usuario (sin Ollama, PyTorch ni ONNX). La inferencia LLM (`gemini-2.5-flash`, `gemini-2.5-flash-lite`) y los embeddings opcionales (`gemini-embedding-001`) corren en la nube de Google AI Studio bajo la capa gratuita del propio estudiante.
+- **Recuperación Híbrida sobre SQLite FTS5:** En la PC solo se indexa texto limpio en tablas `knowledge_sources`, `knowledge_chunks` y `knowledge_chunks_fts` (ranking BM25 en `<5 ms`).
+- **Grounding Estricto y Citas:** El prompt del sistema prohíbe usar conocimiento externo y exige citas verificables `[Curso: <Nombre> | Fuente: <Título>]`. Soporta aislamiento por curso, modo global multi-curso y filtros rápidos por semanas (Parcial / Final).
 
 ### GUI
 

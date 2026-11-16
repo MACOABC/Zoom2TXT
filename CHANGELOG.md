@@ -1,7 +1,9 @@
 # Changelog
 
-## 2.8.0 — Búsqueda de grabaciones por curso
+## 2.8.0 — Búsqueda de grabaciones por curso y Asistente IA en la Nube
 
+- **Asistente IA de Estudio en la Nube (Estilo NotebookLM):** pestaña integrada con motor RAG sobre SQLite FTS5 (BM25) + Gemini Free Tier (`gemini-2.5-flash`, `gemini-2.5-flash-lite`, `gemini-embedding-001`) bajo esquema BYOK (Costo $0, sin tarjeta y 0% de ejecución de IA local en la PC).
+- Ingesta automática de transcripciones verificadas y carga de materiales de curso (`.pdf`, `.pptx`, `.docx`, `.txt`, `.md`), con selector de ámbito por curso o global, filtro por semanas (Parcial/Final), botones de estudio rápido en 1 clic y exportación a Markdown.
 - Selector de un curso o todos los cursos en la pantalla Clases.
 - Actualización de cursos desde Blackboard sin abrir Zoom ni preparar grabaciones.
 - El curso elegido se filtra antes de consultar Zoom y aplicar los límites de la tanda.

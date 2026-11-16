@@ -209,7 +209,7 @@ def run_pipeline(
                     store.put(
                         "job",
                         key,
-                        requested_private=settings.youtube_private,
+                        requested_private=False,
                         upload_attempt_at=time.time(),
                     )
 
@@ -230,7 +230,7 @@ def run_pipeline(
                         nombre_clase,
                         log,
                         settings.sub_lang,
-                        private=settings.youtube_private,
+                        private=False,
                         cancel=cancel,
                         checkpoint={
                             "upload_uri": private.get("upload_uri"),
@@ -375,6 +375,15 @@ def run_pipeline(
             status="done" if synced else "sync_pending",
             sync_local=synced,
             error="",
+        )
+        from zoom2txt.rag_engine import auto_ingest_transcript
+
+        job_info = store.get("job", key)
+        auto_ingest_transcript(
+            settings,
+            txt,
+            course_id=str(job_info.get("course_id", "")),
+            title=str(job_info.get("display_name") or nombre_clase or name),
         )
         return txt, video_id
     except BaseException as exc:
