@@ -14,6 +14,7 @@ from types import SimpleNamespace as NS
 from unittest.mock import MagicMock, patch
 
 import test_hardening as base
+from PySide6.QtCore import Qt
 
 from zoom2txt import config, logs, study
 from zoom2txt.ai_gateway import (
@@ -769,6 +770,29 @@ class InterfaceTests(Case):
         self.assertEqual(window.dock_badge.text(), "Esperando texto")
         window._reset_stages()
         self.assertEqual([row.state for row in window.stage_rows], ["pending"] * 4)
+
+    def test_header_click_toggles_every_selectable_row(self):
+        window = self.window()
+        window._on_scan_found(
+            [
+                dict(course_id="c", course_name="Curso", meeting_id=f"m{i}", name=f"Clase{i}",
+                     start_time="2026-04-01 10:00:00", sort_key="2026-04-01", play_url="")
+                for i in range(3)
+            ]
+        )  # fmt: skip
+        locked = window.table.item(2, 0)
+        locked.setFlags(locked.flags() & ~Qt.ItemFlag.ItemIsEnabled)
+
+        def states():
+            return [window.table.item(r, 0).checkState() == Qt.CheckState.Checked for r in range(3)]
+
+        self.assertEqual(states(), [True, True, True])
+        window._toggle_all_rows(0)
+        self.assertEqual(states(), [False, False, True])  # la fila ya en cola no cambia
+        window._toggle_all_rows(3)
+        self.assertEqual(states(), [False, False, True])
+        window._toggle_all_rows(0)
+        self.assertEqual(states(), [True, True, True])
 
     def test_home_reflects_inventory_and_quota(self):
         ledger = WorkLedger(self.s)

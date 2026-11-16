@@ -48,7 +48,10 @@ a = Analysis(
         'tzdata',
     ],
     hooksconfig={},
-    excludes=['tkinter'],
+    # Paquetes pesados que el proyecto no usa: si el entorno de compilación los
+    # tiene instalados, alguna dependencia opcional los arrastraría al ejecutable.
+    excludes=['tkinter', 'scipy', 'pandas', 'matplotlib', 'IPython', 'notebook', 'pytest',
+              'torch', 'tensorflow', 'sklearn', 'cv2', 'sympy', 'numba'],
     noarchive=False,
 )
 pyz = PYZ(a.pure)

@@ -121,8 +121,8 @@ def _notify_theme_change() -> None:
         alive.append(ref)
         try:
             callback()
-        except RuntimeError:
-            # El widget C++ ya fue destruido; se descarta en la próxima pasada.
+        except Exception:  # noqa: BLE001 — repintar nunca debe impedir el cambio de tema
+            # Widget C++ ya destruido o vista sin datos: se descarta el suscriptor.
             alive.pop()
     _listeners[:] = alive
 

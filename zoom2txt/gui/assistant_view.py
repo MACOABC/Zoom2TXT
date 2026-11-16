@@ -1250,8 +1250,12 @@ class AssistantView(QWidget):
         self.sources_card.setVisible(visible)
 
     def _on_theme_changed(self) -> None:
+        if not self.isVisible():
+            return  # al volver a la pestaña, refresh() repinta todo con el tema vigente
         if not self.chat_view.messages():
             self._render_messages([])
+        if not self.is_busy_generating():
+            self._reload_sources_tree()
 
     def _fill_models(self) -> None:
         current = self.settings.gemini_model or AUTO_MODEL
@@ -1282,9 +1286,10 @@ class AssistantView(QWidget):
         self.semantic_chk.setChecked(self.settings.use_semantic_embeddings)
         self._update_api_status_btn()
 
-        self._reload_courses()
-        self._reload_sources_tree()
-        self._reload_chat_history()
+        if not self.is_busy_generating():
+            self._reload_courses()
+            self._reload_sources_tree()
+            self._reload_chat_history()
 
         # Auto-sincronización silenciosa de clases y materiales en segundo plano
         self.sync_transcripts(silent_if_empty=True)
@@ -1983,6 +1988,15 @@ class AssistantView(QWidget):
         self.input_edit.setReadOnly(active)
         for chip in (*self.quick_prompt_btns, self.saved_btn):
             chip.setEnabled(not active)
+        for control in (
+            self.all_courses_btn,
+            self.sessions_btn,
+            self.new_chat_btn,
+            self.clear_btn,
+            self.model_combo,
+        ):
+            control.setEnabled(not active)
+        self.course_combo.setEnabled(not active and not self.is_all_courses_mode())
 
     def _send_question(self, instruction: str = "", task: str = "chat", label: str = "") -> None:
         if self.is_busy_generating() or self._countdown_timer.isActive():
@@ -2007,6 +2021,7 @@ class AssistantView(QWidget):
         self.rate_limit_banner.hide()
         self._countdown_timer.stop()
         history = self._history()
+        self._pending_session = self._current_session_id
         self._pending_question = question
         self._pending_user = self.chat_view.add_message("user")
         self._pending_user.set_user_text(label or question)
@@ -2172,8 +2187,10 @@ class AssistantView(QWidget):
     def _on_query_done(self, question: str, resp: RAGResponse, stopped: bool = False) -> None:
         self._stream_timer.stop()
         self._set_generating(False)
-        if self._current_session_id is None:
-            self._current_session_id = self.store.get_or_create_chat_session(
+        session_id = getattr(self, "_pending_session", None) or self._current_session_id
+        self._pending_session = None
+        if session_id is None:
+            session_id = self._current_session_id = self.store.get_or_create_chat_session(
                 course_id=self.current_course_id(),
                 all_courses=self.is_all_courses_mode(),
                 title=self.current_course_name(),
@@ -2187,9 +2204,9 @@ class AssistantView(QWidget):
         }
         if stopped:
             meta["stopped"] = True
-        self.store.append_chat_message(self._current_session_id, "user", question)
+        self.store.append_chat_message(session_id, "user", question)
         self.store.append_chat_message(
-            self._current_session_id,
+            session_id,
             "assistant",
             resp.answer,
             citations=resp.citations,

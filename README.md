@@ -27,7 +27,7 @@ Zoom2TXT convierte un flujo académico repetitivo en una aplicación de escritor
 - **Asistente de estudio**: índice local SQLite FTS5 + Gemini con la clave gratuita del propio estudiante (BYOK, `google-genai`). Responde a partir de las transcripciones y materiales del curso (`.pdf`, `.pptx`, `.docx`, `.txt`, `.md`) con **citas numeradas que abren el pasaje original**, memoria de conversación, contexto completo cuando cabe, respuesta en streaming, **tarjetas de repaso** y **simulacros con nota**.
 - Enrutado de modelos que se adapta solo a los cambios de catálogo y a las cuotas de la capa gratuita.
 - Paleta de comandos (Ctrl+K), búsqueda de texto completo en todas las clases y lector integrado.
-- **236 pruebas automatizadas** con HTTP real bloqueado durante los tests.
+- **237 pruebas automatizadas** con HTTP real bloqueado durante los tests.
 
 ## Demo segura, sin credenciales
 

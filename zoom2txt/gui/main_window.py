@@ -692,6 +692,8 @@ class MainWindow(QMainWindow):
         self.table.setMouseTracking(True)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
         self.table.setItemDelegateForColumn(5, widgets.StatusDelegate(self.table))
+        self.table.horizontalHeaderItem(0).setToolTip("Clic para marcar o desmarcar todas")
+        self.table.horizontalHeader().sectionClicked.connect(self._toggle_all_rows)
         style.configure_table(self.table)
         self.table.setFixedHeight(style.HEADER_HEIGHT + 6 * style.ROW_HEIGHT + 2)
         self.classes_empty = widgets.EmptyState(
@@ -756,6 +758,26 @@ class MainWindow(QMainWindow):
         bottom.addWidget(self.cancel_queue_btn)
         lay.addLayout(bottom)
         return tab
+
+    def _toggle_all_rows(self, section: int) -> None:
+        """Clic en la cabecera de la casilla: marca o desmarca todas las filas editables."""
+        if section != 0:
+            return
+        boxes = [
+            self.table.item(row, 0)
+            for row in range(self.table.rowCount())
+            if self.table.item(row, 0) is not None
+            and self.table.item(row, 0).flags() & Qt.ItemFlag.ItemIsEnabled
+        ]
+        if not boxes:
+            return
+        target = (
+            Qt.CheckState.Unchecked
+            if all(box.checkState() == Qt.CheckState.Checked for box in boxes)
+            else Qt.CheckState.Checked
+        )
+        for box in boxes:
+            box.setCheckState(target)
 
     def _reflow_weeks(self) -> None:
         columns = 16 if self.width() >= 1180 else 8
@@ -1442,9 +1464,7 @@ class MainWindow(QMainWindow):
             self.update()
 
     def _toggle_console(self) -> None:
-        visible = not self.console.isVisible() if self.console.isVisibleTo(self.body_widget) or not self.body_widget.isVisible() else False
-        if not self.body_widget.isVisible():
-            visible = self.console.isHidden()
+        visible = self.console.isHidden()
         self.console.setVisible(visible)
         self.toggle_console_btn.setChecked(visible)
         self.settings.activity_collapsed = not visible

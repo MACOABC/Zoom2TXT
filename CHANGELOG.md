@@ -31,11 +31,11 @@ El flujo no cambia: Blackboard → Zoom → YouTube → subtítulos → TXT veri
 
 - Esquema SQLite v3 con migración atómica y copia de seguridad automática previa.
 - Registro de actividad en disco con datos sensibles ocultos y rotación.
-- Inventario, pendientes y portada calculados en una sola lectura; huellas SHA-256 memorizadas por identidad de archivo. La suite pasó de ~97 s a ~47 s con 42 pruebas más.
+- Inventario, pendientes y portada calculados en una sola lectura; huellas SHA-256 memorizadas por identidad de archivo. La suite pasó de ~97 s a ~47 s con 43 pruebas más.
 - Corregido: la sincronización de carpetas reasignaba el curso de una fuente por su nombre de archivo.
 - Corregido: carrera al abrir por primera vez la base desde varios hilos.
 - Opción para buscar clases nuevas al abrir la aplicación.
-- 236 pruebas automatizadas con HTTP real bloqueado.
+- 237 pruebas automatizadas con HTTP real bloqueado.
 
 ## 2.8.0 — Búsqueda de grabaciones por curso y Asistente IA en la Nube
 
