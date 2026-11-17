@@ -1,4 +1,4 @@
-ZOOM2TXT 3.0.0 — INSTALACIÓN EN WINDOWS
+ZOOM2TXT 3.0.1 — INSTALACIÓN EN WINDOWS
 ========================================
 
 1. Extrae el ZIP completo en una carpeta propia.
@@ -34,6 +34,11 @@ Desde el código fuente ejecuta: python main.py --demo
 El demo es local, usa datos ficticios y no se conecta a servicios externos.
 
 Más documentación: https://github.com/MACOABC/Zoom2TXT
+
+NOVEDADES DE 3.0.1
+-----------------
+- Compatible con el reproductor nuevo de Zoom: las clases se descargan
+  directamente, con reanudación. Si algo falla, el aviso dice el motivo real.
 
 NOVEDADES DE 3.0.0
 -----------------

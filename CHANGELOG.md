@@ -1,5 +1,16 @@
 # Changelog
 
+## 3.0.1 — Reproductor nuevo de Zoom
+
+- Zoom cambió su página de grabaciones (`/rec/play/…`) a un reproductor nuevo
+  que yt-dlp no reconoce («Unable to extract data»). La app ahora pide el
+  enlace del video a la API de ese reproductor y lo descarga directamente, con
+  avance real, reanudación tras pausas o cortes y renovación del enlace firmado
+  si caduca. yt-dlp sigue como respaldo para el reproductor clásico y los
+  enlaces con contraseña.
+- Si la descarga falla, el mensaje incluye el motivo real en vez de suponer
+  que la contraseña es incorrecta.
+
 ## 3.0.0 — Evolución
 
 El flujo no cambia: Blackboard → Zoom → YouTube → subtítulos → TXT verificado → limpieza. Todo lo que lo rodea se rehízo.
