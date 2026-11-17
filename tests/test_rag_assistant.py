@@ -455,7 +455,7 @@ class RagAssistantTests(unittest.TestCase):
         self.assertEqual(resp.model_used, "local-fts5")
 
     def test_api_key_encryption_and_redaction(self):
-        secret_key = "AIzaSySecretKeyValueForTesting987654321"
+        secret_key = "AIzaSySecretKeyValueForTesting987654321"  # gitleaks:allow (clave ficticia)
         save_gemini_api_key(secret_key)
         self.assertEqual(load_gemini_api_key(), secret_key)
         key_file = self.root / "gemini_key.json"

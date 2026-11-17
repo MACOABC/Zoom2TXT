@@ -226,7 +226,7 @@ class ZoomPlayerTests(unittest.TestCase):
     def test_failure_reports_the_real_reasons_without_long_tokens(self):
         session = FakeSession()
         session.content_type = "text/html"  # Zoom devuelve una página en vez del video
-        token = "jw2INidckJTuIjSBMv2OsQX6RnpenO8AlSp7C0_wjVPWNjt4"
+        token = "FakeZoomRecordingToken_" + "x" * 28  # identificador largo inventado
 
         def ytdlp(command, cancel=None, timeout=None, on_line=None):
             return NS(

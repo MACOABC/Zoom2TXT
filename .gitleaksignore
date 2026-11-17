@@ -1,0 +1,3 @@
+# Valores ficticios de pruebas ya presentes en el historial (no son secretos reales).
+f797c7b432b906a6caf644f3e262a3e35e7dce97:tests/test_zoom_player.py:generic-api-key:229
+1b595583775390b416031f8e13f3766fa8deef7f:tests/test_rag_assistant.py:gcp-api-key:456
